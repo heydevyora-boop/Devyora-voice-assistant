@@ -1,0 +1,105 @@
+@import './fonts.css';
+@import './tokens.css';
+@import './orb.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: theme('colors.void');
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-block-size: 100dvh;
+    background-color: theme('colors.surface');
+    color: theme('colors.on-surface');
+    font-family: theme('fontFamily.body');
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: theme('fontFamily.display');
+    margin: 0;
+  }
+
+  button { font: inherit; color: inherit; }
+
+  ::selection { background: rgba(76, 215, 246, 0.25); }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.primary');
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Tier 1 — passive glass container. */
+  .glass {
+    background: var(--glass-tier1-bg);
+    backdrop-filter: blur(var(--glass-tier1-blur));
+    -webkit-backdrop-filter: blur(var(--glass-tier1-blur));
+    border: 1px solid var(--glass-tier1-border);
+  }
+
+  /* Tier 2 — floating / active surface. */
+  .glass-floating {
+    background: var(--glass-tier2-bg);
+    backdrop-filter: blur(var(--glass-tier2-blur));
+    -webkit-backdrop-filter: blur(var(--glass-tier2-blur));
+    border: 1px solid var(--glass-tier1-border);
+    box-shadow: var(--glass-tier2-bevel), 0 12px 36px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Older Android WebView has no backdrop-filter: fall back to an opaque
+     surface rather than an unreadable transparent one. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass { background: theme('colors.surface-container-low'); }
+    .glass-floating { background: theme('colors.surface-container'); }
+  }
+
+  /* Horizontal gradient rule that fades out at both margins. */
+  .hairline {
+    block-size: 1px;
+    background: var(--hairline);
+    border: 0;
+  }
+
+  .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
+  /* Safe-area helpers (notch / home indicator / Windows title bar inset). */
+  .pt-safe { padding-block-start: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-block-end: env(safe-area-inset-bottom, 0px); }
+  .px-safe {
+    padding-inline-start: env(safe-area-inset-left, 0px);
+    padding-inline-end: env(safe-area-inset-right, 0px);
+  }
+}
+
+@layer utilities {
+  /* Global guard: any animation anywhere stops under reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+[data-motion='reduced'] *,
+[data-motion='reduced'] *::before,
+[data-motion='reduced'] *::after {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+}

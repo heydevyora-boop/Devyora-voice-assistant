@@ -1,0 +1,416 @@
+/**
+ * Orb visual engine.
+ *
+ * All geometry and colour arrive through the custom properties declared in
+ * tokens.css; this file only describes STRUCTURE and MOTION. State is selected
+ * with a static attribute selector (`[data-state='listening']`), never with a
+ * class string assembled in JavaScript, so nothing here can be purged away.
+ *
+ * Only `transform`, `opacity` and `filter` are animated, so every animation
+ * stays on the compositor and no animation can cause a layout shift.
+ */
+
+/* ------------------------------------------------------------------ stage */
+
+.orb-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* Reserved sanctuary: the orb plus room for its halos, so surrounding
+     content never reflows when the orb scales between states. */
+  inline-size: calc(var(--orb-size) * 1.9);
+  block-size: calc(var(--orb-size) * 1.9);
+  isolation: isolate;
+  touch-action: manipulation;
+}
+
+.orb-layer {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  /* Deliberately no `will-change` here. Promoting a blurred element to its own
+     compositor layer makes Chromium clip `filter: blur()` to the layer bounds,
+     which draws a hard square edge around the soft glow. The browser already
+     promotes these elements for the duration of their animations, so the hint
+     bought nothing and cost correctness. `will-change` is applied below only
+     to layers that are transformed and NOT blurred. */
+}
+
+/* --------------------------------------------------------------- ambient */
+
+/*
+ * The bloom is a multi-stop radial gradient, NOT a blurred solid.
+ * `filter: blur()` is clipped to the element's compositor layer, so the glow
+ * grew a hard square edge whenever an ancestor was promoted — by `will-change`,
+ * by a `transform`, or by the native shell. A gradient has no such bounds, is
+ * cheaper to paint, and looks the same.
+ */
+.orb-ambient {
+  inline-size: calc(var(--orb-size) * 2.1);
+  block-size: calc(var(--orb-size) * 2.1);
+  background: radial-gradient(
+    circle closest-side,
+    color-mix(in srgb, var(--orb-accent) 46%, transparent) 0%,
+    color-mix(in srgb, var(--orb-accent) 26%, transparent) 30%,
+    color-mix(in srgb, var(--orb-accent) 10%, transparent) 55%,
+    color-mix(in srgb, var(--orb-accent) 3%, transparent) 78%,
+    transparent 100%
+  );
+  opacity: var(--ambient-opacity);
+  transform: scale(var(--orb-scale));
+  transition: opacity var(--dur-slow) var(--ease-soft),
+              transform var(--dur-slow) var(--ease-out),
+              background var(--dur-slow) var(--ease-soft);
+}
+
+.orb-ambient--secondary {
+  inline-size: calc(var(--orb-size) * 1.6);
+  block-size: calc(var(--orb-size) * 1.6);
+  background: radial-gradient(
+    circle closest-side,
+    color-mix(in srgb, var(--orb-accent-2) 40%, transparent) 0%,
+    color-mix(in srgb, var(--orb-accent-2) 20%, transparent) 35%,
+    color-mix(in srgb, var(--orb-accent-2) 6%, transparent) 65%,
+    transparent 100%
+  );
+  opacity: calc(var(--ambient-opacity) * 0.7);
+}
+
+/* ----------------------------------------------------------------- halos */
+
+.orb-halo {
+  border: 1px solid color-mix(in srgb, var(--orb-accent) 55%, transparent);
+  transition: opacity var(--dur-slow) var(--ease-soft),
+              transform var(--dur-slow) var(--ease-out),
+              border-color var(--dur-slow) var(--ease-soft);
+}
+
+.orb-halo--outer {
+  inline-size: calc(var(--orb-size) * 1.52);
+  block-size: calc(var(--orb-size) * 1.52);
+  opacity: var(--halo-outer-opacity);
+  transform: scale(var(--halo-outer-scale));
+}
+
+.orb-halo--inner {
+  inline-size: calc(var(--orb-size) * 1.24);
+  block-size: calc(var(--orb-size) * 1.24);
+  border-color: color-mix(in srgb, var(--orb-accent-2) 45%, transparent);
+  opacity: var(--halo-inner-opacity);
+  transform: scale(var(--halo-inner-scale));
+}
+
+/* ------------------------------------------------------------------ core */
+
+.orb-core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: var(--orb-size);
+  block-size: var(--orb-size);
+  padding: 0;
+  border: var(--orb-rim);
+  border-radius: var(--orb-radius);
+  background: var(--orb-gradient);
+  opacity: var(--orb-alpha);
+  cursor: pointer;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  transform: scale(var(--orb-scale)) rotate(var(--orb-rotate));
+  box-shadow:
+    0 0 var(--orb-glow-near) color-mix(in srgb, var(--orb-accent) calc(var(--orb-glow-strength) * 100%), transparent),
+    0 0 var(--orb-glow-far) color-mix(in srgb, var(--orb-accent-2) calc(var(--orb-glow-strength) * 70%), transparent),
+    inset 0 4px 18px rgba(255, 255, 255, 0.4),
+    inset 0 -10px 24px rgba(0, 0, 0, 0.55);
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-slow) var(--ease-soft),
+    background var(--dur-slow) var(--ease-soft),
+    border-color var(--dur-base) var(--ease-soft),
+    opacity var(--dur-base) var(--ease-soft);
+  will-change: transform;
+}
+
+/* Specular lens highlight — the "polished stone" read from DESIGN.md. */
+.orb-core::before {
+  content: '';
+  position: absolute;
+  inset: 4%;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.28) 0%, transparent 45%);
+  pointer-events: none;
+}
+
+/* Rim bevel. */
+.orb-core::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.orb-core:focus-visible {
+  outline: 2px solid var(--primary, #4cd7f6);
+  outline-offset: 6px;
+}
+
+/* Desktop hover — pointer-based so it never sticks on touch devices. */
+@media (hover: hover) and (pointer: fine) {
+  .orb-core:hover {
+    transform: scale(calc(var(--orb-scale) * 1.04)) rotate(var(--orb-rotate));
+    box-shadow:
+      0 0 calc(var(--orb-glow-near) * 1.35) color-mix(in srgb, var(--orb-accent) calc(var(--orb-glow-strength) * 100%), transparent),
+      0 0 calc(var(--orb-glow-far) * 1.3) color-mix(in srgb, var(--orb-accent-2) calc(var(--orb-glow-strength) * 80%), transparent),
+      inset 0 4px 18px rgba(255, 255, 255, 0.45),
+      inset 0 -10px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* Press feedback — shared by mouse, touch and keyboard activation. */
+.orb-core:active,
+.orb-core[data-pressed='true'] {
+  transform: scale(calc(var(--orb-scale) * 0.955)) rotate(var(--orb-rotate));
+  transition-duration: var(--dur-fast);
+}
+
+.orb-core[aria-disabled='true'] {
+  cursor: progress;
+}
+
+/* ------------------------------------------------- inner kinetic blobs */
+
+.orb-blobs {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/*
+ * Inner kinetic colour. Soft radial gradients, with neither `filter: blur()`
+ * nor `mix-blend-mode`.
+ *
+ * `mix-blend-mode: screen` was the last remaining source of square edges:
+ * blending forces Chromium to read back the backdrop, and the readback region
+ * is the rectangular bounds of the compositing layer, which stamped a faint
+ * square over the orb's glow whenever an ancestor was promoted. Plain alpha
+ * compositing over the sphere gradient reaches the same luminous result.
+ */
+.orb-blob {
+  position: absolute;
+  inline-size: 92%;
+  block-size: 92%;
+  border-radius: 9999px;
+  opacity: 0.8;
+}
+
+.orb-blob--a {
+  inset-block-start: -22%;
+  inset-inline-start: -22%;
+  background: radial-gradient(
+    circle closest-side,
+    color-mix(in srgb, var(--orb-accent) 85%, transparent) 0%,
+    color-mix(in srgb, var(--orb-accent) 45%, transparent) 45%,
+    transparent 100%
+  );
+}
+
+.orb-blob--b {
+  inset-block-end: -22%;
+  inset-inline-end: -22%;
+  background: radial-gradient(
+    circle closest-side,
+    color-mix(in srgb, var(--orb-accent-2) 85%, transparent) 0%,
+    color-mix(in srgb, var(--orb-accent-2) 45%, transparent) 45%,
+    transparent 100%
+  );
+}
+
+/* ------------------------------------------------------------- glyph */
+
+.orb-glyph {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.55));
+  transition: opacity var(--dur-base) var(--ease-soft), transform var(--dur-base) var(--ease-out);
+}
+
+/* =================================================================
+   Per-state motion. Every animation is paused rather than removed
+   when --motion-scale is 0, so geometry never jumps.
+   ================================================================= */
+
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(var(--orb-scale)) rotate(var(--orb-rotate)); }
+  50%      { transform: scale(calc(var(--orb-scale) * 1.035)) rotate(var(--orb-rotate)); }
+}
+
+@keyframes orb-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  33%      { transform: translate3d(12%, 8%, 0); }
+  66%      { transform: translate3d(-6%, 14%, 0); }
+}
+
+@keyframes orb-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  33%      { transform: translate3d(-10%, -10%, 0); }
+  66%      { transform: translate3d(8%, -6%, 0); }
+}
+
+@keyframes orb-ripple {
+  0%   { transform: scale(0.92); opacity: 0.55; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+
+@keyframes orb-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orb-ambient-pulse {
+  0%, 100% { opacity: var(--ambient-opacity); }
+  50%      { opacity: calc(var(--ambient-opacity) * 1.45); }
+}
+
+@keyframes orb-attention {
+  0%, 100% { transform: scale(var(--orb-scale)) rotate(var(--orb-rotate)); }
+  50%      { transform: scale(calc(var(--orb-scale) * 1.02)) rotate(var(--orb-rotate)); }
+}
+
+@keyframes orb-success-pop {
+  0%   { transform: scale(calc(var(--orb-scale) * 0.9)) rotate(var(--orb-rotate)); }
+  55%  { transform: scale(calc(var(--orb-scale) * 1.06)) rotate(var(--orb-rotate)); }
+  100% { transform: scale(var(--orb-scale)) rotate(var(--orb-rotate)); }
+}
+
+@keyframes orb-error-shake {
+  0%, 100%   { transform: scale(var(--orb-scale)) translate3d(0, 0, 0) rotate(var(--orb-rotate)); }
+  20%, 60%   { transform: scale(var(--orb-scale)) translate3d(-2.5%, 0, 0) rotate(var(--orb-rotate)); }
+  40%, 80%   { transform: scale(var(--orb-scale)) translate3d(2.5%, 0, 0) rotate(var(--orb-rotate)); }
+}
+
+/* Inner blobs drift in every live state. */
+.orb-stage[data-state] .orb-blob--a { animation: orb-drift-a 9s var(--ease-soft) infinite; }
+.orb-stage[data-state] .orb-blob--b { animation: orb-drift-b 11s var(--ease-soft) infinite; }
+
+/* IDLE — gentle breathing, calm. */
+.orb-stage[data-state='idle'] .orb-core      { animation: orb-breathe 5.5s var(--ease-soft) infinite; }
+.orb-stage[data-state='idle'] .orb-ambient   { animation: orb-ambient-pulse 5.5s var(--ease-soft) infinite; }
+
+/* LISTENING — active cyan, concentric sound rings. */
+.orb-stage[data-state='listening'] .orb-core    { animation: orb-breathe 2.4s var(--ease-soft) infinite; }
+.orb-stage[data-state='listening'] .orb-ambient { animation: orb-ambient-pulse 2.4s var(--ease-soft) infinite; }
+.orb-stage[data-state='listening'] .orb-ring    { animation: orb-ripple 2.8s var(--ease-out) infinite; }
+.orb-stage[data-state='listening'] .orb-ring:nth-of-type(2) { animation-delay: 0.9s; }
+.orb-stage[data-state='listening'] .orb-ring:nth-of-type(3) { animation-delay: 1.8s; }
+
+/* PROCESSING — flowing violet/cyan energy around the rim. */
+.orb-stage[data-state='processing'] .orb-comet  { animation: orb-spin 2.6s linear infinite; opacity: 1; }
+.orb-stage[data-state='processing'] .orb-ambient{ animation: orb-ambient-pulse 1.8s var(--ease-soft) infinite; }
+.orb-stage[data-state='processing'] .orb-glyph  { animation: orb-spin 1.6s linear infinite; }
+
+/* CONFIRMATION — a slow, deliberate attention beat. Approval is required,
+   so the orb must read as waiting, not as working. */
+.orb-stage[data-state='confirmation'] .orb-core { animation: orb-attention 2s var(--ease-soft) infinite; }
+.orb-stage[data-state='confirmation'] .orb-halo--outer {
+  animation: orb-ripple 2.4s var(--ease-out) infinite;
+}
+
+/* EXECUTING — directed, continuous progress sweep. */
+.orb-stage[data-state='executing'] .orb-comet   { animation: orb-spin 1.5s linear infinite; opacity: 1; }
+.orb-stage[data-state='executing'] .orb-core    { animation: orb-breathe 1.6s var(--ease-soft) infinite; }
+
+/* SUCCESS — one short pop, then rest. Non-looping by design. */
+.orb-stage[data-state='success'] .orb-core      { animation: orb-success-pop 620ms var(--ease-out) 1; }
+
+/* ERROR — one short lateral shake, then rest. */
+.orb-stage[data-state='error'] .orb-core        { animation: orb-error-shake 420ms var(--ease-soft) 1; }
+
+/* ---------------------------------------------------- sound rings */
+
+.orb-ring {
+  inline-size: calc(var(--orb-size) * 1.3);
+  block-size: calc(var(--orb-size) * 1.3);
+  border: 1.5px solid color-mix(in srgb, var(--orb-accent) 60%, transparent);
+  opacity: 0;
+}
+
+/* ------------------------------------------- orbiting energy highlight */
+
+/*
+ * A bright node that travels around the rim.
+ *
+ * The first implementation was a conic-gradient ring clipped with
+ * `mask: radial-gradient(...)`. A mask on a child promotes the PARENT into a
+ * masked compositing layer, and Chromium then clips the parent's `box-shadow`
+ * to that layer — which squared off the orb's outer glow, even while the ring
+ * itself sat at `opacity: 0`. This version uses no mask and no filter, so the
+ * glow stays unclipped, and it costs one rotating element instead of a
+ * full-size conic gradient repainted every frame.
+ */
+.orb-comet {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-base) var(--ease-soft);
+  will-change: transform;
+}
+
+.orb-comet::before {
+  content: '';
+  position: absolute;
+  inset-block-start: -6%;
+  inset-inline-start: 50%;
+  inline-size: 34%;
+  block-size: 34%;
+  margin-inline-start: -17%;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle closest-side,
+    rgba(255, 255, 255, 0.95) 0%,
+    color-mix(in srgb, var(--orb-accent) 80%, transparent) 38%,
+    color-mix(in srgb, var(--orb-accent-2) 45%, transparent) 65%,
+    transparent 100%
+  );
+}
+
+/* ================================================= reduced motion ===== */
+
+/* Honour the OS setting and the in-app override identically. */
+@media (prefers-reduced-motion: reduce) {
+  .orb-stage *,
+  .orb-stage *::before,
+  .orb-stage *::after {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+  .orb-comet { opacity: 0.55 !important; }
+}
+
+[data-motion='reduced'] .orb-stage *,
+[data-motion='reduced'] .orb-stage *::before,
+[data-motion='reduced'] .orb-stage *::after {
+  animation: none !important;
+  transition-duration: 1ms !important;
+}
+[data-motion='reduced'] .orb-comet { opacity: 0.55 !important; }
+
+/* --------------------------------------------------- waveform placement */
+
+/* Anchored inside the reserved sanctuary, so toggling it between states
+   cannot move any surrounding content. */
+.orb-waveform {
+  position: absolute;
+  inset-block-end: 11%;
+  inset-inline: 0;
+  margin-inline: auto;
+  pointer-events: none;
+  z-index: 3;
+}

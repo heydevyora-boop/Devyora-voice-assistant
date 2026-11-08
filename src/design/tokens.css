@@ -1,0 +1,92 @@
+/**
+ * Runtime design tokens.
+ *
+ * Tailwind owns the static tokens (colour scale, type scale, radii, spacing).
+ * This file owns the tokens that change at RUNTIME — above all the orb, whose
+ * appearance is a function of state and of user configuration.
+ *
+ * Why CSS custom properties instead of Tailwind classes:
+ * the Stitch export built class strings in JavaScript
+ * (`el.className = '...' + config.sphereClass`). Tailwind's compiler cannot see
+ * those strings, so it purges the utilities and the orb renders unstyled in a
+ * production build. Custom properties are invisible to the purge step and are
+ * also cheaper to animate, so every dynamic orb value flows through them.
+ */
+
+:root {
+  /* ---- Spectral emitters (DESIGN.md "Core AI Spectral Spectrum") ---- */
+  --spectrum-cyan: #06b6d4;
+  --spectrum-violet: #8b5cf6;
+  --spectrum-celestial: #3b82f6;
+  --spectrum-magenta: #d946ef;
+  --spectrum-success: #10b981;
+  --spectrum-error: #ef4444;
+
+  /* ---- Atmospheric tiers (DESIGN.md "Elevation & Depth") ---- */
+  --glass-tier1-bg: rgba(255, 255, 255, 0.04);
+  --glass-tier1-border: rgba(255, 255, 255, 0.08);
+  --glass-tier1-blur: 24px;
+
+  --glass-tier2-bg: rgba(13, 15, 24, 0.65);
+  --glass-tier2-blur: 40px;
+  --glass-tier2-bevel: inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+
+  --glass-border-gradient: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.24) 0%,
+    rgba(255, 255, 255, 0.03) 50%,
+    rgba(6, 182, 212, 0.2) 100%
+  );
+
+  --hairline: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+
+  /* ---- Orb geometry (overridden per breakpoint and per user config) ---- */
+  --orb-size: 176px;
+  --orb-radius: 9999px;
+  --orb-rotate: 0deg;
+
+  /* ---- Orb appearance (overridden per state by Orb.tsx) ---- */
+  --orb-accent: var(--spectrum-cyan);
+  --orb-accent-2: var(--spectrum-violet);
+  --orb-gradient: linear-gradient(135deg, #06b6d4 0%, #571bc1 55%, #8b5cf6 100%);
+  --orb-alpha: 1;
+  --orb-scale: 1;
+  --orb-glow-near: 40px;
+  --orb-glow-far: 90px;
+  --orb-glow-strength: 0.45;
+  --orb-rim: 1px solid rgba(255, 255, 255, 0.14);
+
+  /* ---- Orb halos ---- */
+  --halo-outer-opacity: 0.35;
+  --halo-outer-scale: 1.08;
+  --halo-inner-opacity: 0.25;
+  --halo-inner-scale: 1;
+  --ambient-opacity: 0.55;
+
+  /* ---- Motion ---- */
+  --dur-fast: 180ms;
+  --dur-base: 320ms;
+  --dur-slow: 700ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Global multiplier. Set to 0 by the reduced-motion layer so every
+     animation collapses to its resting frame without being removed. */
+  --motion-scale: 1;
+}
+
+/* Tablet and desktop enlarge the orb sanctuary per DESIGN.md
+   (min 320px mobile / 480px desktop reserved radius). */
+@media (min-width: 768px) {
+  :root { --orb-size: 208px; }
+}
+@media (min-width: 1024px) {
+  :root { --orb-size: 248px; }
+}
+
+/* Compact floating presentation uses a much smaller orb. */
+[data-presentation='compact'] {
+  --orb-size: 112px;
+  --orb-glow-near: 24px;
+  --orb-glow-far: 52px;
+}
