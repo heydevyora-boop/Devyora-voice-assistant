@@ -1,0 +1,67 @@
+# Local development infrastructure.
+#
+# Postgres is the only service required today. Redis is declared because the
+# background-job work needs it shortly, and bringing it up early costs
+# nothing; the application reports it as `not-configured` until REDIS_URL is
+# set, so it does not affect readiness.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devyora-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devyora
+      POSTGRES_PASSWORD: devyora
+      POSTGRES_DB: devyora
+    ports:
+      - '5432:5432'
+    volumes:
+      - devyora-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U devyora -d devyora']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: devyora-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - devyora-redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devyora-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      DATABASE_URL: postgresql://devyora:devyora@postgres:5432/devyora?schema=public
+      CORS_ORIGINS: http://localhost:5173
+      LOG_LEVEL: debug
+      LOG_PRETTY: 'true'
+    ports:
+      - '3000:3000'
+    profiles:
+      # Not started by default: most local work runs the API on the host with
+      # `npm run start:dev` against these containers.
+      - full
+
+volumes:
+  devyora-postgres:
+  devyora-redis:

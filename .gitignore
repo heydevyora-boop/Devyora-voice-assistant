@@ -11,3 +11,11 @@ dist-ssr
 
 # End-to-end suite screenshots
 .test-output
+
+# Backend
+backend/node_modules
+backend/dist
+backend/coverage
+backend/.env
+backend/.env.*
+!backend/.env.example

@@ -1,0 +1,543 @@
+// Devyora central backend — relational model.
+//
+// Ownership: every row that holds user content carries `userId`, directly or
+// one hop away, so a tenant filter can be enforced in one place.
+//
+// Deletion: user-authored content is soft-deleted (`deletedAt`) and purged by
+// a retention job. Infrastructure rows that are meaningless without their
+// parent cascade. AuditLog is append-only and survives account deletion with
+// its user reference nulled, so the record of what happened is not destroyed.
+//
+// JSON is used only where the shape is genuinely open-ended — a provider
+// payload, a captured plan, a preference document — never as a substitute for
+// a relation.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────── enums
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_DELETION
+}
+
+enum DevicePlatform {
+  WINDOWS
+  MACOS
+  ANDROID
+  IOS
+  WEB
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+/// How the user's words reached the assistant.
+enum MessageSource {
+  SPEECH
+  TYPED
+  SCRIPTED
+}
+
+/// Mirrors the frontend's ActionKind union.
+enum ActionKind {
+  NOTE_SAVE
+  REMINDER_CREATE
+  MESSAGE_WHATSAPP
+  MESSAGE_TELEGRAM
+  EMAIL_COMPOSE
+  CALENDAR_EVENT
+  APP_OPEN
+  ASSISTANT_REPLY
+}
+
+/// How far the backend can take an action on its own.
+/// LOCAL    — the server performs it and can verify the result.
+/// ASSISTED — the server prepares it; the user completes it in another app.
+/// ACCOUNT  — needs an authorised account connection.
+enum ExecutionMode {
+  LOCAL
+  ASSISTED
+  ACCOUNT
+}
+
+enum PendingActionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+/// Mirrors the frontend's three-way ActionOutcome. HANDOFF is deliberately
+/// distinct from COMPLETED: something verifiable happened, but the task is
+/// not finished and must never be reported as success.
+enum ExecutionStatus {
+  COMPLETED
+  HANDOFF
+  FAILED
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  FIRED
+  DONE
+  CANCELLED
+}
+
+enum ConnectionProvider {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  TELEGRAM
+  GMAIL
+  GOOGLE_CALENDAR
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  EXPIRED
+  REVOKED
+  ERROR
+}
+
+enum NotificationChannel {
+  PUSH
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
+}
+
+/// Who caused an audited event. `AI` is recorded separately from `USER` so a
+/// model-proposed action is never indistinguishable from a human one.
+enum ActorType {
+  USER
+  SYSTEM
+  AI
+}
+
+// ─────────────────────────────────────────────────────────── identity
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  /// Stored lower-cased by the application so the unique index is
+  /// case-insensitive without requiring the citext extension.
+  email        String     @unique @db.VarChar(320)
+  passwordHash String
+  displayName  String?    @db.VarChar(120)
+  locale       String     @default("en-IN") @db.VarChar(16)
+  timezone     String     @default("Asia/Kolkata") @db.VarChar(64)
+  status       UserStatus @default(ACTIVE)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  devices           Device[]
+  sessions          Session[]
+  conversations     Conversation[]
+  commands          AssistantCommand[]
+  pendingActions    PendingAction[]
+  notes             Note[]
+  reminders         Reminder[]
+  connectedAccounts ConnectedAccount[]
+  preference        UserPreference?
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+
+  @@index([deletedAt])
+  @@index([status])
+  @@map("users")
+}
+
+model Device {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @db.Uuid
+  /// Opaque identifier the client sends; never the primary key.
+  publicId   String         @unique @db.VarChar(64)
+  platform   DevicePlatform
+  name       String         @db.VarChar(120)
+  model      String?        @db.VarChar(120)
+  appVersion String?        @db.VarChar(32)
+
+  /// Push routing token. Null until the device registers for notifications.
+  pushToken       String?
+  /// Whether this device reports a native wake-word engine. Detection itself
+  /// always runs on the device; the backend only records the capability.
+  wakeWordCapable Boolean @default(false)
+
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions      Session[]
+  notifications Notification[]
+
+  @@index([userId, revokedAt])
+  @@index([lastSeenAt])
+  @@map("devices")
+}
+
+model Session {
+  id        String  @id @default(uuid()) @db.Uuid
+  userId    String  @db.Uuid
+  deviceId  String  @db.Uuid
+  ipAddress String? @db.Inet
+  userAgent String?
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device        Device         @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId, endedAt])
+  @@index([deviceId])
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id        String @id @default(uuid()) @db.Uuid
+  sessionId String @db.Uuid
+  /// SHA-256 of the token. The plaintext is returned once and never stored.
+  tokenHash String @unique @db.VarChar(64)
+
+  expiresAt   DateTime
+  /// Set when this token is rotated out, pointing at its replacement.
+  /// Presenting a rotated token is treated as theft and revokes the family.
+  rotatedToId String?   @db.Uuid
+  revokedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────── assistant core
+
+model Conversation {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @db.Uuid
+  title  String? @db.VarChar(200)
+
+  lastMessageAt DateTime?
+  archivedAt    DateTime?
+  deletedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+  commands AssistantCommand[]
+
+  @@index([userId, lastMessageAt(sort: Desc)])
+  @@index([userId, deletedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String         @id @default(uuid()) @db.Uuid
+  conversationId String         @db.Uuid
+  role           MessageRole
+  source         MessageSource?
+  content        String
+
+  /// Token accounting, for cost control and quota enforcement.
+  tokensIn  Int?
+  tokensOut Int?
+
+  createdAt DateTime @default(now())
+
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  commands     AssistantCommand[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+/// What the assistant understood from one utterance, kept separate from the
+/// action it proposed so a misunderstanding can be audited on its own.
+model AssistantCommand {
+  id             String  @id @default(uuid()) @db.Uuid
+  userId         String  @db.Uuid
+  conversationId String? @db.Uuid
+  messageId      String? @db.Uuid
+
+  rawText    String
+  intent     String? @db.VarChar(80)
+  /// Extracted entities. Open-ended by nature: the set differs per intent.
+  entities   Json?
+  confidence Float?
+
+  /// Which interpreter produced this, so mock and live output stay separable.
+  providerId String? @db.VarChar(40)
+  latencyMs  Int?
+
+  createdAt DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation  Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  message       Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  pendingAction PendingAction?
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([conversationId])
+  @@map("assistant_commands")
+}
+
+/// A proposed action awaiting a decision.
+///
+/// `requiresConfirmation` is decided by server policy, never by the client and
+/// never by the model, so approval cannot be skipped by a crafted request.
+model PendingAction {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @db.Uuid
+  commandId String @unique @db.Uuid
+
+  kind          ActionKind
+  executionMode ExecutionMode
+  /// The resolved plan: title, target and the editable fields the user sees.
+  /// Structured but open-ended per kind, so it is stored as a document.
+  plan          Json
+
+  requiresConfirmation Boolean             @default(true)
+  status               PendingActionStatus @default(PENDING)
+
+  /// Supplied by the client on approval. The unique constraint is what makes
+  /// a replayed approval a no-op instead of a duplicate message.
+  idempotencyKey String?   @unique @db.VarChar(100)
+  expiresAt      DateTime
+  decidedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  command    AssistantCommand  @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  executions ActionExecution[]
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@map("pending_actions")
+}
+
+model ActionExecution {
+  id              String @id @default(uuid()) @db.Uuid
+  pendingActionId String @db.Uuid
+  attempt         Int    @default(1)
+
+  status       ExecutionStatus
+  /// Plain-language result shown to the user, in the executor's own words.
+  detail       String
+  /// Identifier returned by an external provider, where one exists.
+  providerRef  String?         @db.VarChar(200)
+  /// Structured provider response for debugging; shape differs per provider.
+  providerMeta Json?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  pendingAction PendingAction @relation(fields: [pendingActionId], references: [id], onDelete: Cascade)
+
+  @@unique([pendingActionId, attempt])
+  @@index([status])
+  @@map("action_executions")
+}
+
+// ───────────────────────────────────────────────────── capabilities
+
+model Note {
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String  @db.Uuid
+  text   String
+  pinned Boolean @default(false)
+
+  /// Client-generated id. Lets an offline device create a note and lets the
+  /// existing browser-stored notes import exactly once.
+  clientId String? @db.VarChar(64)
+  /// Monotonic counter for last-write-wins conflict handling.
+  version  Int     @default(1)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId])
+  @@index([userId, deletedAt, updatedAt(sort: Desc)])
+  @@map("notes")
+}
+
+model Reminder {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  text   String
+
+  dueAt    DateTime
+  /// Stored alongside dueAt so a reminder fires at the right wall-clock time
+  /// even if the user travels.
+  timezone String   @default("Asia/Kolkata") @db.VarChar(64)
+  /// RFC 5545 recurrence rule, null for one-off reminders.
+  rrule    String?  @db.VarChar(200)
+
+  status  ReminderStatus @default(SCHEDULED)
+  /// Queue job handle, so rescheduling can cancel the previous job.
+  jobId   String?        @db.VarChar(100)
+  firedAt DateTime?
+
+  clientId String? @db.VarChar(64)
+  version  Int     @default(1)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId])
+  @@index([userId, status, dueAt])
+  @@index([status, dueAt])
+  @@map("reminders")
+}
+
+/// An authorised third-party account.
+///
+/// Tokens are stored as ciphertext only and are never serialised into an API
+/// response. `keyVersion` exists so the encryption key can be rotated without
+/// a migration.
+model ConnectedAccount {
+  id       String             @id @default(uuid()) @db.Uuid
+  userId   String             @db.Uuid
+  provider ConnectionProvider
+
+  /// The account identifier at the provider, for display and reconciliation.
+  externalAccountId String?  @db.VarChar(200)
+  displayName       String?  @db.VarChar(200)
+  scopes            String[]
+
+  accessTokenEnc  Bytes?
+  refreshTokenEnc Bytes?
+  keyVersion      Int       @default(1)
+  expiresAt       DateTime?
+
+  status    ConnectionStatus @default(CONNECTED)
+  lastError String?
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One live connection per provider per user; revoked rows may accumulate.
+  @@unique([userId, provider, revokedAt])
+  @@index([userId, status])
+  @@map("connected_accounts")
+}
+
+/// One row per user. Grouped documents rather than a column per setting,
+/// because the frontend already treats these as three cohesive objects and
+/// they change shape as features land.
+model UserPreference {
+  userId String @id @db.Uuid
+
+  /// Spoken replies, confirmation timeout, assistant behaviour.
+  assistant  Json @default("{}")
+  /// Speech source, language, retention choices.
+  voice      Json @default("{}")
+  /// Orb palette, shape, size, glow, transparency, rim, motion.
+  appearance Json @default("{}")
+  /// Audio retention and telemetry consent.
+  privacy    Json @default("{}")
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model Notification {
+  id       String  @id @default(uuid()) @db.Uuid
+  userId   String  @db.Uuid
+  deviceId String? @db.Uuid
+
+  channel NotificationChannel @default(PUSH)
+  type    String              @db.VarChar(60)
+  title   String              @db.VarChar(200)
+  body    String?
+  /// Routing payload for the client (deep link, entity ids).
+  payload Json?
+
+  status        NotificationStatus @default(QUEUED)
+  sentAt        DateTime?
+  readAt        DateTime?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@index([status, createdAt])
+  @@map("notifications")
+}
+
+/// Append-only. No update or delete path exists in application code.
+///
+/// `userId` is nullable and uses SetNull so that deleting an account
+/// pseudonymises the trail rather than erasing the record of what happened.
+model AuditLog {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String?   @db.Uuid
+  deviceId  String?   @db.Uuid
+  actorType ActorType @default(USER)
+
+  action     String  @db.VarChar(80)
+  resource   String? @db.VarChar(80)
+  resourceId String? @db.VarChar(64)
+  /// Request context: correlation id, outcome, non-sensitive parameters.
+  metadata   Json?
+
+  ipAddress String? @db.Inet
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([resource, resourceId])
+  @@map("audit_logs")
+}
