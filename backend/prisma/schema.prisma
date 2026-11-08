@@ -37,6 +37,13 @@ enum DevicePlatform {
   WEB
 }
 
+/// Purpose of a single-use token. One table rather than two keeps expiry,
+/// consumption and cleanup in one place.
+enum VerificationTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
 enum MessageRole {
   USER
   ASSISTANT
@@ -146,21 +153,37 @@ model User {
   timezone     String     @default("Asia/Kolkata") @db.VarChar(64)
   status       UserStatus @default(ACTIVE)
 
+  /// Null until the address is proven. Nothing here fakes verification: it
+  /// is set only when a real token issued to that address is presented.
+  emailVerifiedAt DateTime?
+
+  /// Account-level brute-force protection, alongside per-IP rate limiting.
+  /// Counted on the account so an attacker rotating IPs is still slowed.
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+
+  /// Invalidates every access token issued before this moment. Bumped on a
+  /// password change or a global logout, so tokens already in flight stop
+  /// working without waiting for them to expire.
+  tokensValidFrom DateTime @default(now())
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  devices           Device[]
-  sessions          Session[]
-  conversations     Conversation[]
-  commands          AssistantCommand[]
-  pendingActions    PendingAction[]
-  notes             Note[]
-  reminders         Reminder[]
-  connectedAccounts ConnectedAccount[]
-  preference        UserPreference?
-  notifications     Notification[]
-  auditLogs         AuditLog[]
+  devices            Device[]
+  sessions           Session[]
+  conversations      Conversation[]
+  commands           AssistantCommand[]
+  pendingActions     PendingAction[]
+  notes              Note[]
+  reminders          Reminder[]
+  connectedAccounts  ConnectedAccount[]
+  preference         UserPreference?
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  verificationTokens VerificationToken[]
 
   @@index([deletedAt])
   @@index([status])
@@ -170,10 +193,16 @@ model User {
 model Device {
   id         String         @id @default(uuid()) @db.Uuid
   userId     String         @db.Uuid
-  /// Opaque identifier the client sends; never the primary key.
+  /// Server-generated opaque identifier the client stores and may present
+  /// on a later login to reuse this device record. It is not a credential:
+  /// it is only honoured after the password has been verified, and only
+  /// when it belongs to the authenticating account.
   publicId   String         @unique @db.VarChar(64)
   platform   DevicePlatform
   name       String         @db.VarChar(120)
+  /// Hardware class reported by the client: "phone", "laptop", "tablet",
+  /// "desktop". Advisory only; never used for authorisation.
+  deviceType String?        @db.VarChar(40)
   model      String?        @db.VarChar(120)
   appVersion String?        @db.VarChar(32)
 
@@ -236,6 +265,33 @@ model RefreshToken {
   @@index([sessionId])
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+/// Single-use tokens for email verification and password reset.
+///
+/// Only the hash is stored, exactly as for refresh tokens: a database leak
+/// must not hand an attacker a working reset link.
+model VerificationToken {
+  id     String                @id @default(uuid()) @db.Uuid
+  userId String                @db.Uuid
+  type   VerificationTokenType
+
+  /// SHA-256 of the token. The plaintext exists only in the delivered email.
+  tokenHash String @unique @db.VarChar(64)
+
+  /// The address the token was issued for. A later email change must not
+  /// let an old token verify the new address.
+  emailAtIssue String @db.VarChar(320)
+
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@map("verification_tokens")
 }
 
 // ─────────────────────────────────────────────────── assistant core

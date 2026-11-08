@@ -11,6 +11,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // The suite shares one source address, so the rate limits are scaled up
+    // under NODE_ENV=test (see src/security/rate-limits.ts). The limiter
+    // itself stays installed and is exercised by rate-limit.spec.ts.
+    env: { NODE_ENV: 'test' },
     include: ['test/**/*.spec.ts', 'src/**/*.spec.ts'],
     // Integration specs share one database; serial avoids cross-talk.
     fileParallelism: false,

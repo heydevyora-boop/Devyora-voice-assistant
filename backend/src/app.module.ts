@@ -1,29 +1,46 @@
 import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { RateLimit } from './security/rate-limits';
 import { AppConfigModule } from './config/app-config.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { PrismaModule } from './database/prisma.module';
+import { SecurityModule } from './security/security.module';
+import { CsrfGuard } from './security/guards/csrf.guard';
+import { JwtAuthGuard } from './security/guards/jwt-auth.guard';
 import { HealthModule } from './modules/health/health.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UsersModule } from './modules/users/users.module';
+import { DevicesModule } from './modules/devices/devices.module';
 
 /**
  * Composition root.
  *
- * Core modules are global, so feature modules declare only what they own.
- * Feature modules are added here as each chunk lands; the dependency
- * direction is always core → feature, never the reverse.
+ * Guard order matters and is the reason these are listed explicitly:
+ * throttling first so an abusive caller is rejected before any work,
+ * then authentication, then CSRF — which needs to know whether the
+ * credential arrived in a cookie, so it has to run after the guard that
+ * establishes that.
  */
 @Module({
   imports: [
     // Core
     AppConfigModule,
     PrismaModule,
+    SecurityModule,
+
+    // In-memory counters today. Chunk 6 introduces Redis, which is what
+    // makes these limits hold across more than one instance.
+    ThrottlerModule.forRoot([{ name: 'default', ...RateLimit.global }]),
 
     // Features
     HealthModule,
+    AuthModule,
+    UsersModule,
+    DevicesModule,
 
-    // Chunk 3: AuthModule, UsersModule, DevicesModule
     // Chunk 4: NotesModule, RemindersModule, PreferencesModule
     // Chunk 5: AiModule, ConversationsModule
     // Chunk 6: ActionsModule, JobsModule, NotificationsModule
@@ -31,15 +48,17 @@ import { HealthModule } from './modules/health/health.module';
     // Chunk 8: ConnectionsModule
   ],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Registered globally, so every route is private unless it carries
+    // `@Public()`. A new route is therefore closed by default.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
   ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // First in the chain: everything downstream logs the same correlation id.
-    // `{*path}` is the Express 5 / path-to-regexp spelling of a catch-all;
-    // a bare '*' is no longer valid and only works via a deprecation shim.
     consumer.apply(CorrelationIdMiddleware).forRoutes('{*path}');
   }
 }
