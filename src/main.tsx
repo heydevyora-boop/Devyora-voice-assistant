@@ -3,15 +3,20 @@ import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import { App } from '@/app/App';
 import { useOrbStore } from '@/stores/orbStore';
+import { useVoiceStore } from '@/stores/voiceStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import '@/design/base.css';
 
 /**
- * Development-only handle on the orb store, so the state machine can be
- * driven end to end from a test runner before the voice pipeline exists.
+ * Development-only handles on the stores, so a test runner can inspect the
+ * real state the app reached rather than inferring it from pixels.
  * Stripped from production builds by the `import.meta.env.DEV` guard.
  */
 if (import.meta.env.DEV) {
-  (window as unknown as Record<string, unknown>).__orb = useOrbStore;
+  const w = window as unknown as Record<string, unknown>;
+  w.__orb = useOrbStore;
+  w.__voice = useVoiceStore;
+  w.__settings = useSettingsStore;
 }
 
 /**

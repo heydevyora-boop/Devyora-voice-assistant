@@ -7,6 +7,7 @@ import { useOrbStore } from '@/stores/orbStore';
 import { HomeScreen } from '@/routes/HomeScreen';
 import { CompactScreen } from '@/routes/CompactScreen';
 import { SettingsScreen } from '@/routes/SettingsScreen';
+import { VoiceScreen } from '@/routes/VoiceScreen';
 import { PlaceholderScreen } from '@/routes/PlaceholderScreen';
 import { StatePreviewScreen } from '@/routes/StatePreviewScreen';
 
@@ -31,17 +32,7 @@ export function App() {
           <Route path="/" element={<HomeScreen />} />
           <Route path="/compact" element={<CompactScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
-          <Route
-            path="/voice"
-            element={
-              <PlaceholderScreen
-                title="Voice"
-                glyph="waveform"
-                summary="Microphone capture, live transcription and spoken replies."
-                arrivesIn="Arrives with the voice pipeline"
-              />
-            }
-          />
+          <Route path="/voice" element={<VoiceScreen />} />
           <Route
             path="/apps"
             element={

@@ -7,10 +7,16 @@ it appears.
 
 ## Status
 
-Chunk 2 — the orb, its state machine and the minimal primary interface.
-There is no voice pipeline yet: the orb enters `listening` when you activate it
-and waits for a real speech/AI layer to report what happened. It never invents
-progress or a result.
+Chunk 3 — the voice interaction layer on top of the Chunk 2 orb.
+
+What is real: microphone capture and live level metering, browser speech
+recognition, browser speech synthesis, and local actions (notes, reminders)
+that are written to storage and read back before being reported as done.
+
+What is not, and says so in the interface: there is no AI service, so commands
+are matched against a short list of fixed phrasings and anything else is
+reported as unsupported rather than guessed at. No message is ever sent on the
+user's behalf.
 
 ## Running it
 
@@ -35,11 +41,21 @@ src/
 ├── components/
 │   ├── primitives/ Icon (inline SVG set), cn
 │   └── shell/      AmbientBackground, AppHeader, SecondaryNav
-├── features/orb/   Orb, Waveform, orbStates, orbMachine, types
+├── features/
+│   ├── orb/        Orb, Waveform, orbStates, orbMachine, types
+│   └── voice/      useVoiceSession, VoicePanel, ActionConfirmation,
+│                   ClarificationPrompt, TranscriptCard, notices, text fallback
+├── services/
+│   ├── stt/        SttProvider contract, Web Speech adapter, scripted stand-in
+│   ├── tts/        TtsProvider contract, Web Speech Synthesis adapter
+│   ├── nlu/        CommandInterpreter contract, on-device phrase rules
+│   ├── audio/      live microphone metering (AnalyserNode)
+│   ├── actions/    plan model, execution modes, local executor
+│   └── wakeWord.ts readiness contract — deliberately not implemented
 ├── hooks/          useReducedMotion, useBreakpoint
 ├── platform/       capability detection (host, OS, overlay, wake word)
 ├── routes/         Home, Compact, Settings, placeholders, dev state gallery
-└── stores/         orbStore (Zustand)
+└── stores/         orbStore (phase), voiceStore (turn content), settingsStore
 ```
 
 ### The orb's seven states
@@ -60,6 +76,46 @@ Events are split in two:
 Nothing in this chunk emits a pipeline event, which is why the orb cannot show
 a fabricated success.
 
+### The voice turn
+
+`useVoiceSession` owns the side effects and translates their real results into
+events on the orb machine. It adds no second state machine: `orbStore` holds
+the phase, `voiceStore` holds the content of the turn, and nothing else writes
+to both.
+
+```
+idle --tap--> listening --engine delivers--> processing
+      |                                         |
+      |                        +----------------+----------------+
+      |                        v                                 v
+      |                  confirmation  --approve-->  executing --> success
+      |                (sensitive or                     |
+      |                 externally visible)              +------> handoff -> idle
+      +<-- cancel / Escape / timeout / error <-----------+
+```
+
+Confirmation is required for anything that leaves the device or is visible to
+someone else. A note or a reminder is private, local and reversible, so it
+runs straight away.
+
+### What the assistant will not claim
+
+- **Nothing is sent.** WhatsApp does not let another app send on a user's
+  behalf. The executor opens a prefilled draft and reports a `handoff`, a
+  result distinct from success, and the orb returns to rest rather than
+  showing a tick.
+- **A launch is not a success.** Opening an application cannot be verified
+  from a web page, so `app.open` also reports a handoff.
+- **An unresolved name is a question, not a guess.** With no contact directory
+  connected, "send a message to Rahul" raises a clarification instead of
+  picking someone.
+- **The waveform only moves to real audio.** Bars are driven by an
+  `AnalyserNode` over the live stream; with no capture they hold a still
+  resting silhouette.
+- **Mock providers are labelled wherever their output appears**, so a scripted
+  transcript or a pattern-matched plan cannot read as something heard or
+  understood.
+
 ### Styling rules worth keeping
 
 **Dynamic orb values are CSS custom properties, never JavaScript-built class
@@ -79,6 +135,14 @@ rather than the element itself.
 
 **Only `transform` and `opacity` are animated**, and the orb's sanctuary
 reserves space for its largest state, so no state change can shift the layout.
+
+### Wake word
+
+Not implemented, on purpose. A browser `getUserMedia` loop held open to listen
+for a phrase would keep the microphone live and drain the battery, and it still
+would not work with the app closed — which is the only time a wake word is
+useful. `services/wakeWord.ts` defines the contract and reports that nothing is
+listening; real detection belongs to an on-device model in the native shell.
 
 ### Platform support
 

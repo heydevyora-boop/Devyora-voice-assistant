@@ -120,14 +120,9 @@ export function Orb({
       </button>
 
       {def.waveform ? (
-        <Waveform
-          active
-          levels={levels}
-          reducedMotion={reducedMotion}
-          // Anchored inside the reserved sanctuary, so showing or hiding
-          // it never moves surrounding content.
-          className="orb-waveform"
-        />
+        // Anchored inside the reserved sanctuary, so showing or hiding it
+        // never moves surrounding content.
+        <Waveform levels={levels} className="orb-waveform" />
       ) : null}
     </div>
   );

@@ -55,11 +55,15 @@ const TRANSITIONS: Readonly<Record<OrbState, TransitionMap>> = {
     REVISE: 'listening',
     CANCEL: 'idle',
     ACTIVATE: 'idle',
+    // A turn can finish without succeeding and without failing — for example
+    // when the action was handed to another app for the user to complete.
+    DISMISS: 'idle',
     FAILED: 'error',
   },
   executing: {
     CANCEL: 'idle',
     COMPLETED: 'success',
+    DISMISS: 'idle',
     FAILED: 'error',
   },
   success: {

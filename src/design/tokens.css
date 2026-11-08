@@ -84,6 +84,20 @@
   :root { --orb-size: 248px; }
 }
 
+/*
+ * While a contextual card is open the orb yields room to it, so the confirm
+ * and cancel controls stay reachable without scrolling on a phone.
+ */
+@media (max-width: 767px) {
+  [data-panel='open'] { --orb-size: 112px; }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  [data-panel='open'] { --orb-size: 150px; }
+}
+@media (min-width: 1024px) {
+  [data-panel='open'] { --orb-size: 180px; }
+}
+
 /* Compact floating presentation uses a much smaller orb. */
 [data-presentation='compact'] {
   --orb-size: 112px;
