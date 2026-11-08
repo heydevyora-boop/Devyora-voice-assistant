@@ -46,7 +46,13 @@ export type GlyphName =
   | 'apps'
   | 'tune'
   | 'person'
-  | 'chevron-right';
+  | 'chevron-right'
+  | 'chat'
+  | 'camera'
+  | 'globe'
+  | 'mail'
+  | 'calendar'
+  | 'note';
 
 /**
  * User-configurable orb appearance.

@@ -8,6 +8,12 @@ import type { OrbState, OrbStateDefinition } from './types';
  * production build purges (Chunk 1, risk R1). Custom properties survive the
  * build and animate on the compositor.
  *
+ * Two states — `idle` and `listening` — take their colour from the user's
+ * chosen palette, because those are the orb at rest and the orb hearing you:
+ * its identity. The remaining states keep fixed colours, because a green
+ * "done" and a red "failure" mean something, and letting a palette repaint
+ * them would make the orb unreadable.
+ *
  * Colours come from DESIGN.md's spectral spectrum:
  *   Electric Cyan #06B6D4 — voice reception and affirmative feedback
  *   Neon Violet  #8B5CF6 — computation and machine reasoning
@@ -24,10 +30,11 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
     waveform: false,
     locked: false,
     vars: {
-      '--orb-accent': 'var(--spectrum-cyan)',
-      '--orb-accent-2': 'var(--spectrum-violet)',
+      // Resting identity: the user's palette, dimmed towards the canvas.
+      '--orb-accent': 'var(--orb-user-from)',
+      '--orb-accent-2': 'var(--orb-user-to)',
       '--orb-gradient':
-        'linear-gradient(135deg, #0b5f72 0%, #3a2a74 55%, #2a2b55 100%)',
+        'linear-gradient(135deg, color-mix(in srgb, var(--orb-user-from) 52%, #121319) 0%, color-mix(in srgb, var(--orb-user-to) 52%, #121319) 100%)',
       '--orb-scale': '0.94',
       '--orb-glow-near': '26px',
       '--orb-glow-far': '62px',
@@ -35,7 +42,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.4',
       '--halo-outer-opacity': '0.16',
       '--halo-inner-opacity': '0.1',
-      '--orb-rim': '1px solid rgba(255, 255, 255, 0.1)',
     },
   },
 
@@ -48,10 +54,10 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
     waveform: true,
     locked: false,
     vars: {
-      '--orb-accent': 'var(--spectrum-cyan)',
-      '--orb-accent-2': 'var(--spectrum-violet)',
-      '--orb-gradient':
-        'linear-gradient(135deg, #06b6d4 0%, #571bc1 58%, #8b5cf6 100%)',
+      // Listening is the user's palette at full strength.
+      '--orb-accent': 'var(--orb-user-from)',
+      '--orb-accent-2': 'var(--orb-user-to)',
+      '--orb-gradient': 'var(--orb-user-gradient)',
       '--orb-scale': '1',
       '--orb-glow-near': '48px',
       '--orb-glow-far': '96px',
@@ -59,7 +65,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.7',
       '--halo-outer-opacity': '0.5',
       '--halo-inner-opacity': '0.34',
-      '--orb-rim': '1px solid rgba(76, 215, 246, 0.45)',
     },
   },
 
@@ -83,7 +88,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.62',
       '--halo-outer-opacity': '0.26',
       '--halo-inner-opacity': '0.22',
-      '--orb-rim': '1px solid rgba(139, 92, 246, 0.45)',
     },
   },
 
@@ -107,7 +111,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.6',
       '--halo-outer-opacity': '0.42',
       '--halo-inner-opacity': '0.2',
-      '--orb-rim': '1.5px solid rgba(59, 130, 246, 0.6)',
     },
   },
 
@@ -131,7 +134,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.68',
       '--halo-outer-opacity': '0.3',
       '--halo-inner-opacity': '0.2',
-      '--orb-rim': '1px solid rgba(217, 70, 239, 0.5)',
     },
   },
 
@@ -155,7 +157,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.6',
       '--halo-outer-opacity': '0.34',
       '--halo-inner-opacity': '0.18',
-      '--orb-rim': '1px solid rgba(16, 185, 129, 0.5)',
     },
   },
 
@@ -179,7 +180,6 @@ export const ORB_STATE_DEFINITIONS: Readonly<Record<OrbState, OrbStateDefinition
       '--ambient-opacity': '0.45',
       '--halo-outer-opacity': '0.3',
       '--halo-inner-opacity': '0.14',
-      '--orb-rim': '1px solid rgba(255, 180, 171, 0.45)',
     },
   },
 };

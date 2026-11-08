@@ -7,7 +7,8 @@ it appears.
 
 ## Status
 
-Chunk 3 — the voice interaction layer on top of the Chunk 2 orb.
+Chunk 4 — the secondary surfaces: connected apps, the orb customiser and
+settings.
 
 What is real: microphone capture and live level metering, browser speech
 recognition, browser speech synthesis, and local actions (notes, reminders)
@@ -16,7 +17,8 @@ that are written to storage and read back before being reported as done.
 What is not, and says so in the interface: there is no AI service, so commands
 are matched against a short list of fixed phrasings and anything else is
 reported as unsupported rather than guessed at. No message is ever sent on the
-user's behalf.
+user's behalf, and no application account can be linked, because account
+linking needs an OAuth backend and a browser must never hold the tokens.
 
 ## Running it
 
@@ -43,19 +45,22 @@ src/
 │   └── shell/      AmbientBackground, AppHeader, SecondaryNav
 ├── features/
 │   ├── orb/        Orb, Waveform, orbStates, orbMachine, types
-│   └── voice/      useVoiceSession, VoicePanel, ActionConfirmation,
-│                   ClarificationPrompt, TranscriptCard, notices, text fallback
+│   ├── voice/      useVoiceSession, VoicePanel, ActionConfirmation,
+│   │               ClarificationPrompt, TranscriptCard, notices, text fallback
+│   └── apps/       AppCard
 ├── services/
 │   ├── stt/        SttProvider contract, Web Speech adapter, scripted stand-in
 │   ├── tts/        TtsProvider contract, Web Speech Synthesis adapter
 │   ├── nlu/        CommandInterpreter contract, on-device phrase rules
 │   ├── audio/      live microphone metering (AnalyserNode)
 │   ├── actions/    plan model, execution modes, local executor
+│   ├── connections/ integration contract, app registry, hand-off launcher
 │   └── wakeWord.ts readiness contract — deliberately not implemented
 ├── hooks/          useReducedMotion, useBreakpoint
 ├── platform/       capability detection (host, OS, overlay, wake word)
-├── routes/         Home, Compact, Settings, placeholders, dev state gallery
-└── stores/         orbStore (phase), voiceStore (turn content), settingsStore
+├── routes/         Home, Voice, Apps, Style, Settings, Compact, dev gallery
+└── stores/         orbStore (phase), voiceStore (turn content),
+                    settingsStore, appearanceStore
 ```
 
 ### The orb's seven states
@@ -135,6 +140,34 @@ rather than the element itself.
 
 **Only `transform` and `opacity` are animated**, and the orb's sanctuary
 reserves space for its largest state, so no state change can shift the layout.
+
+### Orb appearance
+
+`features/orb/appearance.ts` holds the model, the palettes, the presets and
+one pure `appearanceToVars()` translation to CSS custom properties.
+`appearanceStore` persists the saved choice, and every `Orb` reads it — so the
+customiser's preview is the real component with an unsaved draft passed as a
+prop, not a second implementation that could drift from it.
+
+Two things the palette deliberately does not touch: the colours of `success`
+and `error`, and the animations tied to listening, thinking and results.
+Those carry meaning, and a style choice should never make the orb harder to
+read. Size sets the floating widget in pixels; the main screen scales with it
+rather than matching it.
+
+### Connected apps
+
+Each capability is labelled by what can actually happen today:
+
+- **on device** — runs here and the result is verified (notes, reminders).
+- **hand-off** — the app opens with your content filled in through a
+  documented public URL, and you finish it.
+- **needs account** — waiting on an authorised backend that does not exist.
+
+No application is ever shown as connected unless the connections provider
+says so, and the provider in this build cannot connect anything; attempting it
+reports why. Each card also discloses the authorisation a real link would
+request.
 
 ### Wake word
 

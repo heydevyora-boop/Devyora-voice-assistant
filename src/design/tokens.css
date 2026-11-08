@@ -40,7 +40,12 @@
 
   --hairline: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
 
-  /* ---- Orb geometry (overridden per breakpoint and per user config) ---- */
+  /* ---- Orb geometry ----
+     `--orb-base-size` is the responsive size the layout wants; the user's
+     size choice multiplies it through `--orb-size-scale`, and `.orb-stage`
+     derives the `--orb-size` everything else is measured against. */
+  --orb-base-size: 176px;
+  --orb-size-scale: 1;
   --orb-size: 176px;
   --orb-radius: 9999px;
   --orb-rotate: 0deg;
@@ -54,6 +59,8 @@
   --orb-glow-near: 40px;
   --orb-glow-far: 90px;
   --orb-glow-strength: 0.45;
+  /* User glow slider, 1 at the default setting. */
+  --orb-glow-scale: 1;
   --orb-rim: 1px solid rgba(255, 255, 255, 0.14);
 
   /* ---- Orb halos ---- */
@@ -78,10 +85,10 @@
 /* Tablet and desktop enlarge the orb sanctuary per DESIGN.md
    (min 320px mobile / 480px desktop reserved radius). */
 @media (min-width: 768px) {
-  :root { --orb-size: 208px; }
+  :root { --orb-base-size: 208px; }
 }
 @media (min-width: 1024px) {
-  :root { --orb-size: 248px; }
+  :root { --orb-base-size: 248px; }
 }
 
 /*
@@ -89,18 +96,18 @@
  * and cancel controls stay reachable without scrolling on a phone.
  */
 @media (max-width: 767px) {
-  [data-panel='open'] { --orb-size: 112px; }
+  [data-panel='open'] { --orb-base-size: 112px; }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
-  [data-panel='open'] { --orb-size: 150px; }
+  [data-panel='open'] { --orb-base-size: 150px; }
 }
 @media (min-width: 1024px) {
-  [data-panel='open'] { --orb-size: 180px; }
+  [data-panel='open'] { --orb-base-size: 180px; }
 }
 
 /* Compact floating presentation uses a much smaller orb. */
 [data-presentation='compact'] {
-  --orb-size: 112px;
+  --orb-base-size: 112px;
   --orb-glow-near: 24px;
   --orb-glow-far: 52px;
 }

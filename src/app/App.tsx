@@ -8,6 +8,8 @@ import { HomeScreen } from '@/routes/HomeScreen';
 import { CompactScreen } from '@/routes/CompactScreen';
 import { SettingsScreen } from '@/routes/SettingsScreen';
 import { VoiceScreen } from '@/routes/VoiceScreen';
+import { AppsScreen } from '@/routes/AppsScreen';
+import { StyleScreen } from '@/routes/StyleScreen';
 import { PlaceholderScreen } from '@/routes/PlaceholderScreen';
 import { StatePreviewScreen } from '@/routes/StatePreviewScreen';
 
@@ -33,28 +35,8 @@ export function App() {
           <Route path="/compact" element={<CompactScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="/voice" element={<VoiceScreen />} />
-          <Route
-            path="/apps"
-            element={
-              <PlaceholderScreen
-                title="Connected apps"
-                glyph="apps"
-                summary="Link the apps the assistant is allowed to act in, and see what each one can do."
-                arrivesIn="Arrives with the secondary surfaces"
-              />
-            }
-          />
-          <Route
-            path="/style"
-            element={
-              <PlaceholderScreen
-                title="Orb style"
-                glyph="tune"
-                summary="Shape, palette, size, glow and motion for the orb, applied everywhere it appears."
-                arrivesIn="Arrives with the secondary surfaces"
-              />
-            }
-          />
+          <Route path="/apps" element={<AppsScreen />} />
+          <Route path="/style" element={<StyleScreen />} />
           {import.meta.env.DEV ? (
             <Route path="/dev/states" element={<StatePreviewScreen />} />
           ) : null}

@@ -99,6 +99,43 @@ const PATHS: Record<GlyphName, JSX.Element> = {
     </>
   ),
   'chevron-right': <path d="m9.5 5.5 6.5 6.5-6.5 6.5" />,
+  chat: <path d="M20 12.5a7.5 7.5 0 0 1-11 6.65L4.5 20.5l1.4-4.4A7.5 7.5 0 1 1 20 12.5Z" />,
+  camera: (
+    <>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17" cy="7" r="0.9" fill="currentColor" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z" />
+    </>
+  ),
+  mail: (
+    <>
+      <rect x="3" y="5.5" width="18" height="13" rx="2.5" />
+      <path d="m3.8 7.2 7.3 5.3a1.5 1.5 0 0 0 1.8 0l7.3-5.3" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+      <path d="M3.5 9.75h17" />
+      <path d="M8 3v3.5" />
+      <path d="M16 3v3.5" />
+    </>
+  ),
+  note: (
+    <>
+      <path d="M5 4.5h11l4 4v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5V6a1.5 1.5 0 0 1 1-1.5Z" />
+      <path d="M15.5 4.5V9h4.2" />
+      <path d="M8 13h7" />
+      <path d="M8 16.5h4.5" />
+    </>
+  ),
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
