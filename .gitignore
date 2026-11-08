@@ -5,3 +5,6 @@ dist-ssr
 .DS_Store
 .vite
 *.log
+
+# TypeScript incremental build info
+*.tsbuildinfo
