@@ -24,12 +24,12 @@ function NavRow({
   return (
     <Link
       to={to}
-      className="flex items-center justify-between gap-space-md px-space-md py-space-sm transition-colors hover:bg-surface-container-high/40"
+      className="flex min-w-0 items-center justify-between gap-space-sm px-space-md py-space-sm transition-colors hover:bg-surface-container-high/40"
     >
       <span className="flex min-w-0 items-center gap-space-sm">
         <Icon name={glyph} size={18} className="shrink-0 text-primary" />
         <span className="min-w-0">
-          <span className="block font-display text-label-lg text-on-surface">{title}</span>
+          <span className="block truncate font-display text-label-lg text-on-surface">{title}</span>
           <span className="block truncate font-body text-body-sm text-on-surface-variant">{detail}</span>
         </span>
       </span>
@@ -60,8 +60,10 @@ type MicPermission = 'granted' | 'denied' | 'prompt' | 'unknown';
  * account of what this app stores and what leaves the device.
  */
 export function SettingsScreen() {
-  const { speakReplies, setSpeakReplies, confirmTimeoutSeconds, setConfirmTimeoutSeconds } =
-    useSettingsStore();
+  const speakReplies = useSettingsStore((s) => s.speakReplies);
+  const setSpeakReplies = useSettingsStore((s) => s.setSpeakReplies);
+  const confirmTimeoutSeconds = useSettingsStore((s) => s.confirmTimeoutSeconds);
+  const setConfirmTimeoutSeconds = useSettingsStore((s) => s.setConfirmTimeoutSeconds);
   const appearance = useAppearanceStore((s) => s.appearance);
   const [tts] = useState(() => selectTts());
   const [micPermission, setMicPermission] = useState<MicPermission>('unknown');
@@ -113,7 +115,7 @@ export function SettingsScreen() {
       {/* One readable column until there is room for two, rather than one
           stretched the full width of a tablet. */}
       <div className="mx-auto grid w-full max-w-[720px] gap-space-md lg:max-w-[1100px] lg:grid-cols-2 lg:items-start">
-        <div className="flex flex-col gap-space-md">
+        <div className="flex min-w-0 flex-col gap-space-md">
           <h1 className="font-display text-headline-md text-on-surface lg:col-span-2">Settings</h1>
 
           {/* ---- Where everything else lives ---- */}
@@ -178,7 +180,7 @@ export function SettingsScreen() {
                 value={confirmTimeoutSeconds}
                 aria-label="Confirmation timeout"
                 onChange={(e) => setConfirmTimeoutSeconds(Number(e.target.value))}
-                className="h-10 shrink-0 rounded-full bg-surface-container-lowest/80 px-space-sm font-display text-label-md text-on-surface outline-none ring-1 ring-outline-variant focus:ring-primary"
+                className="h-11 shrink-0 rounded-full bg-surface-container-lowest/80 px-space-sm font-display text-label-md text-on-surface outline-none ring-1 ring-outline-variant focus:ring-primary"
               >
                 <option value={0}>Never</option>
                 <option value={30}>30s</option>
@@ -190,7 +192,7 @@ export function SettingsScreen() {
           </GlassCard>
         </div>
 
-        <div className="flex flex-col gap-space-md">
+        <div className="flex min-w-0 flex-col gap-space-md">
           {/* ---- Permissions and privacy ---- */}
           <GlassCard className="px-space-md py-space-xs">
             <p className="py-space-xs font-display text-label-sm uppercase tracking-[0.06em] text-on-surface-variant">
@@ -225,7 +227,7 @@ export function SettingsScreen() {
                 type="button"
                 onClick={clearLocalData}
                 disabled={counts.notes + counts.reminders === 0}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-surface-container-high/80 text-on-surface-variant transition-colors hover:text-error disabled:opacity-40"
+                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-full bg-surface-container-high/80 text-on-surface-variant transition-colors hover:text-error disabled:opacity-40"
               >
                 <Icon name="close" size={15} />
                 <span className="font-display text-label-md">Delete notes & reminders</span>
@@ -249,7 +251,7 @@ export function SettingsScreen() {
 
           <Link
             to="/"
-            className="inline-flex h-10 w-fit items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
+            className="inline-flex h-11 w-fit items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
           >
             <Icon name="orb" size={16} />
             <span className="font-display text-label-md">Back to the orb</span>

@@ -28,16 +28,14 @@ function ServiceRow({ title, info, extra }: { title: string; info: ProviderInfo;
  */
 export function VoiceScreen() {
   const session = useVoiceSession();
-  const {
-    sttChoice,
-    setSttChoice,
-    scriptedPhrase,
-    setScriptedPhrase,
-    speakReplies,
-    setSpeakReplies,
-    confirmTimeoutSeconds,
-    setConfirmTimeoutSeconds,
-  } = useSettingsStore();
+  const sttChoice = useSettingsStore((s) => s.sttChoice);
+  const setSttChoice = useSettingsStore((s) => s.setSttChoice);
+  const scriptedPhrase = useSettingsStore((s) => s.scriptedPhrase);
+  const setScriptedPhrase = useSettingsStore((s) => s.setScriptedPhrase);
+  const speakReplies = useSettingsStore((s) => s.speakReplies);
+  const setSpeakReplies = useSettingsStore((s) => s.setSpeakReplies);
+  const confirmTimeoutSeconds = useSettingsStore((s) => s.confirmTimeoutSeconds);
+  const setConfirmTimeoutSeconds = useSettingsStore((s) => s.setConfirmTimeoutSeconds);
 
   const { stt, sttSupported, tts, interpreter, wakeWord } = session.providers;
 
@@ -160,7 +158,7 @@ export function VoiceScreen() {
           <select
             value={confirmTimeoutSeconds}
             onChange={(e) => setConfirmTimeoutSeconds(Number(e.target.value))}
-            className="h-10 shrink-0 rounded-full bg-surface-container-lowest/80 px-space-sm font-display text-label-md text-on-surface outline-none ring-1 ring-outline-variant focus:ring-primary"
+            className="h-11 shrink-0 rounded-full bg-surface-container-lowest/80 px-space-sm font-display text-label-md text-on-surface outline-none ring-1 ring-outline-variant focus:ring-primary"
           >
             <option value={0}>Never</option>
             <option value={30}>30s</option>
@@ -178,7 +176,7 @@ export function VoiceScreen() {
 
       <Link
         to="/"
-        className="mt-space-md inline-flex h-10 items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
+        className="mt-space-md inline-flex h-11 items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
       >
         <Icon name="orb" size={16} />
         <span className="font-display text-label-md">Back to the orb</span>

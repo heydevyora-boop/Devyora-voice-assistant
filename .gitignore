@@ -8,3 +8,6 @@ dist-ssr
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# End-to-end suite screenshots
+.test-output

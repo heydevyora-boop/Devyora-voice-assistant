@@ -3,6 +3,7 @@ import { useOrbStore } from '@/stores/orbStore';
 import { useVoiceStore, type VoiceError, type VoiceInputSource } from '@/stores/voiceStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { startMicMeter, MicError, type MicMeter } from '@/services/audio/micMeter';
+import { publishLevels } from '@/services/audio/levelBus';
 import { webSpeechStt } from '@/services/stt/webSpeechStt';
 import { createMockStt } from '@/services/stt/mockStt';
 import { STT_ERROR_COPY, SttError, type SttProvider, type SttSession } from '@/services/stt/types';
@@ -59,7 +60,12 @@ export function useVoiceSession() {
   const orbState = useOrbStore((s) => s.state);
   const send = useOrbStore((s) => s.send);
   const voice = useVoiceStore;
-  const settings = useSettingsStore();
+  // Field-level selectors: a whole-store subscription re-rendered every
+  // consumer of this hook whenever any unrelated setting changed.
+  const sttChoice = useSettingsStore((s) => s.sttChoice);
+  const scriptedPhrase = useSettingsStore((s) => s.scriptedPhrase);
+  const speakReplies = useSettingsStore((s) => s.speakReplies);
+  const confirmTimeoutSeconds = useSettingsStore((s) => s.confirmTimeoutSeconds);
 
   const sttSession = useRef<SttSession | null>(null);
   const micMeter = useRef<MicMeter | null>(null);
@@ -77,8 +83,8 @@ export function useVoiceSession() {
   const wakeWord = useMemo(() => selectWakeWord(), []);
 
   const stt: SttProvider = useMemo(
-    () => (settings.sttChoice === 'scripted' ? createMockStt(settings.scriptedPhrase) : webSpeechStt),
-    [settings.sttChoice, settings.scriptedPhrase],
+    () => (sttChoice === 'scripted' ? createMockStt(scriptedPhrase) : webSpeechStt),
+    [sttChoice, scriptedPhrase],
   );
 
   /* ------------------------------------------------------------ teardown */
@@ -98,7 +104,7 @@ export function useVoiceSession() {
     }
     micMeter.current?.stop();
     micMeter.current = null;
-    voice.getState().setLevels(null);
+    publishLevels(null);
     voice.getState().setMicActive(false);
   }, [voice, clearStopWatchdog]);
 
@@ -175,9 +181,9 @@ export function useVoiceSession() {
       }
 
       send({ type: 'COMPLETED' });
-      if (settings.speakReplies && plan.spokenReply) void tts.speak(plan.spokenReply);
+      if (speakReplies && plan.spokenReply) void tts.speak(plan.spokenReply);
     },
-    [send, fail, clearConfirmTimer, voice, settings.speakReplies, tts],
+    [send, fail, clearConfirmTimer, voice, speakReplies, tts],
   );
 
   /* ------------------------------------------------------ confirmation */
@@ -188,7 +194,7 @@ export function useVoiceSession() {
       voice.getState().setClarification(clarification);
       send({ type: 'NEEDS_APPROVAL' });
 
-      const seconds = settings.confirmTimeoutSeconds;
+      const seconds = confirmTimeoutSeconds;
       if (seconds > 0) {
         const myTurn = turnId.current;
         voice.getState().setConfirmDeadline(Date.now() + seconds * 1000);
@@ -206,7 +212,7 @@ export function useVoiceSession() {
         }, seconds * 1000);
       }
     },
-    [send, settings.confirmTimeoutSeconds, voice],
+    [send, confirmTimeoutSeconds, voice],
   );
 
   /* ------------------------------------------------- interpret a phrase */
@@ -287,7 +293,8 @@ export function useVoiceSession() {
         micMeter.current = await startMicMeter({
           barCount: WAVEFORM_BAR_COUNT,
           onLevels: (levels) => {
-            if (myTurn === turnId.current) voice.getState().setLevels(levels);
+            // Straight to the visualiser; costs no render.
+            if (myTurn === turnId.current) publishLevels(levels);
           },
           onError: (error) => {
             if (myTurn === turnId.current) fail({ code: 'mic', ...MIC_ERROR_COPY[error.code] });
@@ -323,7 +330,7 @@ export function useVoiceSession() {
           if (myTurn === turnId.current) {
             micMeter.current?.stop();
             micMeter.current = null;
-            voice.getState().setLevels(null);
+            publishLevels(null);
             voice.getState().setMicActive(false);
           }
         },

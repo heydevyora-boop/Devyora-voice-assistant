@@ -23,6 +23,11 @@
     -moz-osx-font-smoothing: grayscale;
     overscroll-behavior-y: none;
     -webkit-tap-highlight-color: transparent;
+    /* `clip`, not `hidden`: it stops the ambient blooms from ever producing a
+       horizontal scrollbar without creating a scroll container, so `sticky`
+       inside the page keeps working. Layout overflow is still caught by the
+       element-level checks in the responsive suite. */
+    overflow-x: clip;
   }
 
   h1, h2, h3, h4, h5, h6 {

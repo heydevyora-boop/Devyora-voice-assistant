@@ -15,7 +15,14 @@ export interface AppHeaderProps {
  */
 export function AppHeader({ status, live }: AppHeaderProps) {
   return (
-    <header className="pt-safe px-safe fixed inset-x-0 top-0 z-40">
+    <header
+      className="pt-safe px-safe fixed inset-x-0 top-0 z-40 backdrop-blur-xl"
+      style={{
+        // The Stitch reference keeps a translucent bar here; without it,
+        // content scrolling underneath is unreadable.
+        background: 'linear-gradient(to bottom, rgba(18, 19, 25, 0.92), rgba(18, 19, 25, 0.62) 70%, transparent)',
+      }}
+    >
       <div className="mx-auto flex h-16 max-w-workspace items-center justify-between px-space-md">
         <div className="flex items-center gap-space-sm">
           <span
@@ -36,7 +43,7 @@ export function AppHeader({ status, live }: AppHeaderProps) {
 
         <Link
           to="/settings"
-          className="glass flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:text-on-surface"
+          className="glass flex h-11 w-11 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:text-on-surface"
           aria-label="Open settings"
         >
           <Icon name="settings" size={18} />

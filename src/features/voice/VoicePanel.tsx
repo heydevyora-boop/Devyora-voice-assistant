@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useVoiceStore } from '@/stores/voiceStore';
 import { useOrbStore } from '@/stores/orbStore';
 import { TranscriptCard } from './TranscriptCard';
@@ -5,30 +6,6 @@ import { ActionConfirmation } from './ActionConfirmation';
 import { ClarificationPrompt } from './ClarificationPrompt';
 import { ErrorNotice, ResultNotice, UnsupportedNotice } from './ResultNotice';
 import type { VoiceSession } from './useVoiceSession';
-
-/**
- * Whether the contextual panel currently has anything to show.
- *
- * The screen layout depends on this — a centred orb with nothing beneath it
- * at rest, and a top-aligned column once a card appears — so the condition
- * lives in one place rather than being restated by each consumer.
- */
-export function useHasPanelContent(): boolean {
-  const orbState = useOrbStore((s) => s.state);
-  const interim = useVoiceStore((s) => s.interim);
-  const transcript = useVoiceStore((s) => s.transcript);
-  const plan = useVoiceStore((s) => s.plan);
-  const clarification = useVoiceStore((s) => s.clarification);
-  const outcome = useVoiceStore((s) => s.outcome);
-  const unsupported = useVoiceStore((s) => s.unsupported);
-  const error = useVoiceStore((s) => s.error);
-
-  const showTranscript = Boolean(transcript || interim) && orbState !== 'idle' && !error;
-  const showConfirmation = orbState === 'confirmation' && (plan !== null || clarification !== null);
-  const showOutcome = outcome !== null && outcome.status !== 'failed' && !error;
-
-  return showTranscript || showConfirmation || showOutcome || unsupported !== null || error !== null;
-}
 
 export interface VoicePanelProps {
   session: VoiceSession;
@@ -45,8 +22,33 @@ export interface VoicePanelProps {
  */
 export function VoicePanel({ session, onUseText }: VoicePanelProps) {
   const orbState = useOrbStore((s) => s.state);
-  const { interim, transcript, transcriptSource, plan, clarification, outcome, unsupported, error, confirmDeadline } =
-    useVoiceStore();
+  // One selector per field: a whole-store subscription re-rendered every card
+  // on each interim-transcript update.
+  const interim = useVoiceStore((s) => s.interim);
+  const transcript = useVoiceStore((s) => s.transcript);
+  const transcriptSource = useVoiceStore((s) => s.transcriptSource);
+  const plan = useVoiceStore((s) => s.plan);
+  const clarification = useVoiceStore((s) => s.clarification);
+  const outcome = useVoiceStore((s) => s.outcome);
+  const unsupported = useVoiceStore((s) => s.unsupported);
+  const error = useVoiceStore((s) => s.error);
+  const confirmDeadline = useVoiceStore((s) => s.confirmDeadline);
+
+  // A decision the user has to make should not be waiting below the fold.
+  // On a short phone the action card can start off-screen, so it is brought
+  // into view when it appears — instantly where reduced motion is asked for.
+  const decisionRef = useRef<HTMLDivElement>(null);
+  const awaitingDecision = orbState === 'confirmation';
+  useEffect(() => {
+    if (!awaitingDecision) return;
+    const node = decisionRef.current;
+    if (!node) return;
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const id = requestAnimationFrame(() =>
+      node.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'nearest' }),
+    );
+    return () => cancelAnimationFrame(id);
+  }, [awaitingDecision, plan, clarification]);
 
   const showTranscript =
     Boolean(transcript || interim) && orbState !== 'idle' && !error;
@@ -72,14 +74,17 @@ export function VoicePanel({ session, onUseText }: VoicePanelProps) {
       ) : null}
 
       {showClarification && clarification ? (
+        <div ref={decisionRef}>
         <ClarificationPrompt
           clarification={clarification}
           onAnswer={session.answerClarification}
           onCancel={session.cancel}
         />
+        </div>
       ) : null}
 
       {showConfirmation && plan ? (
+        <div ref={decisionRef}>
         <ActionConfirmation
           plan={plan}
           deadline={confirmDeadline}
@@ -88,6 +93,7 @@ export function VoicePanel({ session, onUseText }: VoicePanelProps) {
           onCancel={session.reject}
           onRevise={session.revise}
         />
+        </div>
       ) : null}
 
       {showOutcome && outcome ? <ResultNotice outcome={outcome} onDismiss={session.dismiss} /> : null}

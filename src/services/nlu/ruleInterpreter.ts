@@ -104,10 +104,8 @@ function openAppPlan(name: string, url: string): CommandPlan {
  * the kind of claim this product should not make. Anything it does not
  * recognise comes back as `unsupported` — it never guesses.
  */
-export const ruleInterpreter: CommandInterpreter = {
-  info: INFO,
-
-  interpret: async (raw: string): Promise<InterpretResult> => {
+function parse(raw: string): InterpretResult {
+  {
     const text = raw.trim();
     if (!text) {
       return { type: 'unsupported', heard: raw, reason: 'Nothing was recognised.' };
@@ -185,5 +183,12 @@ export const ruleInterpreter: CommandInterpreter = {
       reason:
         'No AI service is connected, so only a few fixed phrasings are understood. Try “save a note …”, “remind me to …”, “send a WhatsApp message to … saying …”, or “open …”.',
     };
-  },
+  }
+}
+
+export const ruleInterpreter: CommandInterpreter = {
+  info: INFO,
+  // Matching is synchronous. The contract is a promise so an AI service can
+  // replace this without touching a single caller.
+  interpret: (raw: string) => Promise.resolve(parse(raw)),
 };

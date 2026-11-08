@@ -43,16 +43,20 @@ export const localConnectionsProvider: ConnectionsProvider = {
     };
   },
 
-  connect: async (appId: string): Promise<ConnectionState> => {
+  // Promise-returning by contract: a real provider reaches a backend. This
+  // one cannot connect anything, so it rejects with the reason.
+  connect: (appId: string): Promise<ConnectionState> => {
     const app = integrationById(appId);
-    throw new ConnectionError(
-      'no-service',
-      `Linking ${app?.name ?? 'this application'} needs an OAuth backend. None is configured, so nothing was connected.`,
+    return Promise.reject(
+      new ConnectionError(
+        'no-service',
+        `Linking ${app?.name ?? 'this application'} needs an OAuth backend. None is configured, so nothing was connected.`,
+      ),
     );
   },
 
-  disconnect: async (appId: string): Promise<ConnectionState> =>
-    localConnectionsProvider.state(appId),
+  disconnect: (appId: string): Promise<ConnectionState> =>
+    Promise.resolve(localConnectionsProvider.state(appId)),
 };
 
 export function selectConnectionsProvider(): ConnectionsProvider {

@@ -20,12 +20,26 @@ const TONE: Record<ControlSpec['tone'], string> = {
  * The list is derived from state, so only legal actions are ever on screen
  * and nothing lingers once it stops applying.
  */
-export function ListeningControls({ controls }: { controls: readonly ControlSpec[] }) {
-  // The strip keeps its height even when empty. Letting it collapse made the
-  // centred column re-flow the instant a control appeared, shifting the
-  // status text under the user's finger.
+export interface ListeningControlsProps {
+  controls: readonly ControlSpec[];
+  /**
+   * Hold the strip's height while empty. Needed when the column is centred,
+   * because letting it collapse re-flows everything the moment a control
+   * appears — and pointless once a card has top-aligned the column.
+   */
+  reserveHeight: boolean;
+}
+
+export function ListeningControls({ controls, reserveHeight }: ListeningControlsProps) {
+  if (controls.length === 0 && !reserveHeight) return null;
+
   return (
-    <div className="flex min-h-[52px] items-center justify-center gap-space-sm">
+    <div
+      className={[
+        'flex items-center justify-center gap-space-sm',
+        reserveHeight ? 'min-h-[52px]' : '',
+      ].join(' ')}
+    >
       {controls.map((c) => (
         <button
           key={c.id}

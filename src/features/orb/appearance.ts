@@ -207,11 +207,6 @@ export function appearanceToVars(appearance: OrbAppearance): CSSProperties {
   } as CSSProperties;
 }
 
-/** Widget size in px, for the compact floating presentation. */
-export function widgetSizePx(appearance: OrbAppearance): number {
-  return appearance.size;
-}
-
 export function appearanceEquals(a: OrbAppearance, b: OrbAppearance): boolean {
   return (
     a.paletteId === b.paletteId &&

@@ -31,7 +31,7 @@ export function PlaceholderScreen({ title, glyph, summary, arrivesIn }: Placehol
         </p>
         <Link
           to="/"
-          className="mt-space-md inline-flex h-10 items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
+          className="mt-space-md inline-flex h-11 items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
         >
           <Icon name="orb" size={16} />
           <span className="font-display text-label-md">Back to the orb</span>

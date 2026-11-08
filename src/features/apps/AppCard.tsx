@@ -121,7 +121,7 @@ export function AppCard({ app, state, blockedReason, busy, onConnect, onDisconne
               key={c.id}
               type="button"
               onClick={() => onLaunch(c)}
-              className="flex h-9 items-center gap-1.5 rounded-full bg-surface-container-high/80 px-3 text-on-surface transition-colors hover:bg-surface-container-highest active:scale-95"
+              className="flex h-11 items-center gap-1.5 rounded-full bg-surface-container-high/80 px-4 text-on-surface transition-colors hover:bg-surface-container-highest active:scale-95"
             >
               <Icon name={app.glyph} size={14} style={{ color: app.brandColor }} />
               <span className="font-display text-label-md">{c.label}</span>
@@ -137,7 +137,7 @@ export function AppCard({ app, state, blockedReason, busy, onConnect, onDisconne
               type="button"
               disabled={busy}
               onClick={onDisconnect}
-              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-surface-container-high/80 text-on-surface-variant transition-colors hover:text-error disabled:opacity-50"
+              className="flex h-11 w-full items-center justify-center gap-1.5 rounded-full bg-surface-container-high/80 text-on-surface-variant transition-colors hover:text-error disabled:opacity-50"
             >
               <Icon name="close" size={15} />
               <span className="font-display text-label-md">Disconnect</span>
@@ -148,7 +148,7 @@ export function AppCard({ app, state, blockedReason, busy, onConnect, onDisconne
               disabled={busy}
               onClick={onConnect}
               aria-describedby={blockedReason ? `${app.id}-blocked` : undefined}
-              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-full bg-surface-container-high/80 text-on-surface transition-colors hover:bg-surface-container-highest disabled:opacity-50"
+              className="flex h-11 w-full items-center justify-center gap-1.5 rounded-full bg-surface-container-high/80 text-on-surface transition-colors hover:bg-surface-container-highest disabled:opacity-50"
             >
               <Icon name="apps" size={15} />
               <span className="font-display text-label-md">

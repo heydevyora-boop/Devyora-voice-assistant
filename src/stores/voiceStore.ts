@@ -25,9 +25,13 @@ interface VoiceStore {
   /** The settled utterance for this turn. */
   transcript: string;
   transcriptSource: VoiceInputSource | null;
-  /** Live microphone levels, 0..1 per bar. Null when nothing is captured. */
-  levels: number[] | null;
-  /** True once real audio has been observed, so the UI need not guess. */
+  /**
+   * True while the microphone is open.
+   *
+   * The per-frame amplitudes are NOT held here: they travel on
+   * `services/audio/levelBus` straight to the visualiser, because sixty store
+   * updates a second would re-render the whole screen for nine transforms.
+   */
   micActive: boolean;
 
   plan: CommandPlan | null;
@@ -42,7 +46,6 @@ interface VoiceStore {
 
   setInterim: (text: string) => void;
   setTranscript: (text: string, source: VoiceInputSource) => void;
-  setLevels: (levels: number[] | null) => void;
   setMicActive: (active: boolean) => void;
   setPlan: (plan: CommandPlan | null) => void;
   setClarification: (c: Clarification | null) => void;
@@ -58,7 +61,6 @@ const EMPTY = {
   interim: '',
   transcript: '',
   transcriptSource: null,
-  levels: null,
   micActive: false,
   plan: null,
   clarification: null,
@@ -73,7 +75,6 @@ export const useVoiceStore = create<VoiceStore>((set) => ({
 
   setInterim: (interim) => set({ interim }),
   setTranscript: (transcript, transcriptSource) => set({ transcript, transcriptSource, interim: '' }),
-  setLevels: (levels) => set({ levels }),
   setMicActive: (micActive) => set({ micActive }),
   setPlan: (plan) => set({ plan }),
   setClarification: (clarification) => set({ clarification }),

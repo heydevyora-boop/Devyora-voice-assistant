@@ -75,7 +75,9 @@ export const webSpeechStt: SttProvider = {
 
   isSupported: () => getCtor() !== null,
 
-  start: async (handlers: SttHandlers): Promise<SttSession> => {
+  // Starting the engine is synchronous; the contract is a promise so a
+  // network-backed provider can slot in unchanged.
+  start: (handlers: SttHandlers): Promise<SttSession> => {
     const Ctor = getCtor();
     if (!Ctor) throw new SttError('not-supported', 'No speech recognition engine in this browser.');
 
@@ -120,12 +122,12 @@ export const webSpeechStt: SttProvider = {
       throw new SttError('unknown', cause instanceof Error ? cause.message : 'Could not start listening.');
     }
 
-    return {
+    return Promise.resolve({
       stop: () => recognition.stop(),
       abort: () => {
         aborted = true;
         recognition.abort();
       },
-    };
+    });
   },
 };

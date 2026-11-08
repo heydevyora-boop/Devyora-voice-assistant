@@ -1,16 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { WAVEFORM_BAR_COUNT } from '@/features/voice/constants';
+import { subscribeLevels } from '@/services/audio/levelBus';
 
 /** Resting heights as a fraction of the track. Mirrors the Stitch bar rhythm. */
 const REST = [0.18, 0.34, 0.55, 0.78, 1, 0.82, 0.5, 0.3, 0.16];
 
 export interface WaveformProps {
   /**
-   * Live amplitude per bar, 0..1, from the microphone's analyser.
+   * Live amplitudes, 0..1 per bar. Omit to subscribe to the microphone bus,
+   * which is how the app uses it; the explicit prop exists for previews.
    *
-   * When this is absent the bars hold a still resting silhouette. They are
-   * never animated from invented values: a visualiser that moves without
-   * audio behind it would misrepresent what the assistant is hearing.
+   * With no audio the bars hold a still resting silhouette. They are never
+   * animated from invented values: a visualiser that moves without audio
+   * behind it would misrepresent what the assistant is hearing.
    */
   levels?: readonly number[];
   className?: string;
@@ -19,26 +21,39 @@ export interface WaveformProps {
 /**
  * Multi-frequency bar visualiser.
  *
- * Heights are written straight to the DOM through a ref rather than through
- * React state — at 60fps, a state update per frame would re-render the tree
- * sixty times a second for a purely visual change.
+ * Heights are written straight to the DOM. At sixty frames a second a React
+ * state update per frame would re-render the tree for a purely visual change,
+ * so this component renders once and then only mutates `transform`.
  */
 export function Waveform({ levels, className }: WaveformProps) {
   const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
+  const liveRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const paint = (next: readonly number[] | null) => {
     barsRef.current.forEach((bar, i) => {
       if (!bar) return;
-      const v = levels ? Math.min(1, Math.max(0.06, levels[i] ?? 0)) : REST[i];
+      const v = next ? Math.min(1, Math.max(0.06, next[i] ?? 0)) : REST[i];
       bar.style.transform = `scaleY(${v.toFixed(3)})`;
+      bar.style.opacity = next ? '1' : '0.5';
     });
+    liveRef.current?.setAttribute('data-live', next ? 'true' : 'false');
+  };
+
+  // Explicit levels win; otherwise follow the microphone bus.
+  useEffect(() => {
+    if (levels) {
+      paint(levels);
+      return;
+    }
+    return subscribeLevels(paint);
   }, [levels]);
 
   return (
     <div
+      ref={liveRef}
       className={className}
       aria-hidden="true"
-      data-live={levels ? 'true' : 'false'}
+      data-live="false"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -61,14 +76,13 @@ export function Waveform({ levels, className }: WaveformProps) {
             transformOrigin: 'center',
             transform: `scaleY(${REST[i]})`,
             transition: 'transform 70ms linear',
-            opacity: levels ? 1 : 0.5,
+            opacity: 0.5,
             background:
               i < 3
                 ? 'var(--spectrum-celestial)'
                 : i < 6
                   ? 'var(--spectrum-cyan)'
                   : 'var(--spectrum-magenta)',
-            boxShadow: i === 4 && levels ? '0 0 10px var(--spectrum-cyan)' : undefined,
           }}
         />
       ))}

@@ -84,6 +84,12 @@
 
 /* Tablet and desktop enlarge the orb sanctuary per DESIGN.md
    (min 320px mobile / 480px desktop reserved radius). */
+/* A 176px orb reserves a 334px sanctuary, which does not fit a 320px phone
+   once the page gutters are counted — and fits even less inside the
+   customiser's preview card. Small screens get a smaller orb. */
+@media (max-width: 400px) {
+  :root { --orb-base-size: 132px; }
+}
 @media (min-width: 768px) {
   :root { --orb-base-size: 208px; }
 }
@@ -95,7 +101,10 @@
  * While a contextual card is open the orb yields room to it, so the confirm
  * and cancel controls stay reachable without scrolling on a phone.
  */
-@media (max-width: 767px) {
+@media (max-width: 400px) {
+  [data-panel='open'] { --orb-base-size: 96px; }
+}
+@media (min-width: 401px) and (max-width: 767px) {
   [data-panel='open'] { --orb-base-size: 112px; }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
@@ -103,6 +112,31 @@
 }
 @media (min-width: 1024px) {
   [data-panel='open'] { --orb-base-size: 180px; }
+}
+
+/*
+ * Short viewports with a card open. On a 568px-tall phone the confirmation
+ * controls fall below the fold at the normal proportions, so the orb gives up
+ * more room and the secondary hint line steps aside. The heading, the card
+ * and its buttons all stay.
+ */
+@media (max-height: 700px) {
+  [data-panel='open'] { --orb-base-size: 76px; }
+  [data-panel='open'] .orb-status { min-block-size: 0; margin-block-start: 0; }
+  [data-panel='open'] .orb-hint { display: none; }
+
+  /* Once an action card is on screen it restates the recipient and the
+     message, so the full transcript above it is redundant. Two lines are
+     enough to confirm the assistant heard the right thing. */
+  [data-panel='open'] .transcript-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    font-size: 15px;
+    line-height: 21px;
+  }
 }
 
 /* Compact floating presentation uses a much smaller orb. */

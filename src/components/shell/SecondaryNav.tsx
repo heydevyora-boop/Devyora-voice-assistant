@@ -31,16 +31,21 @@ export interface SecondaryNavProps {
 export function SecondaryNav({ hidden }: SecondaryNavProps) {
   return (
     <nav
-      className="pb-safe fixed inset-x-0 bottom-0 z-40 flex justify-center transition-[opacity,transform] duration-300"
+      // The wrapper spans the viewport so the pill can be centred, but only
+      // the pill itself may take pointer events — otherwise the empty space
+      // either side of it swallows clicks on the content behind.
+      className="pb-safe pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center transition-[opacity,transform] duration-300"
       style={{
         opacity: hidden ? 0 : 1,
         transform: hidden ? 'translateY(12px)' : 'none',
-        pointerEvents: hidden ? 'none' : 'auto',
       }}
       aria-hidden={hidden}
       aria-label="Secondary navigation"
     >
-      <div className="glass-floating mb-3 flex items-center gap-space-xs rounded-xl p-space-xs">
+      <div
+        className="glass-floating pointer-events-auto mb-3 flex items-center gap-space-xs rounded-xl p-space-xs"
+        style={{ pointerEvents: hidden ? 'none' : undefined }}
+      >
         {ITEMS.map((item) => (
           <NavLink
             key={item.to}

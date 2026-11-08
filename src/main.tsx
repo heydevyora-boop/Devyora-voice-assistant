@@ -5,6 +5,7 @@ import { App } from '@/app/App';
 import { useOrbStore } from '@/stores/orbStore';
 import { useVoiceStore } from '@/stores/voiceStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { currentLevels, subscribeLevels } from '@/services/audio/levelBus';
 import '@/design/base.css';
 
 /**
@@ -17,6 +18,9 @@ if (import.meta.env.DEV) {
   w.__orb = useOrbStore;
   w.__voice = useVoiceStore;
   w.__settings = useSettingsStore;
+  // The microphone levels deliberately bypass React state, so the suites
+  // observe them here rather than on a store.
+  w.__levels = { current: currentLevels, subscribe: subscribeLevels };
 }
 
 /**

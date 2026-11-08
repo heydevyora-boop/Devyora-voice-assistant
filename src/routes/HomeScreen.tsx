@@ -6,7 +6,8 @@ import { disposeOrbTimers, useOrbStore } from '@/stores/orbStore';
 import { useVoiceStore } from '@/stores/voiceStore';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { useVoiceSession } from '@/features/voice/useVoiceSession';
-import { useHasPanelContent, VoicePanel } from '@/features/voice/VoicePanel';
+import { VoicePanel } from '@/features/voice/VoicePanel';
+import { useHasPanelContent } from '@/features/voice/useHasPanelContent';
 import { ListeningControls, type ControlSpec } from '@/features/voice/ListeningControls';
 import { TextCommandBar } from '@/features/voice/TextCommandBar';
 import { Icon } from '@/components/primitives/Icon';
@@ -24,7 +25,6 @@ export function HomeScreen() {
   const reducedMotion = useReducedMotion();
   const session = useVoiceSession();
 
-  const levels = useVoiceStore((s) => s.levels);
   const micActive = useVoiceStore((s) => s.micActive);
   const voiceError = useVoiceStore((s) => s.error);
   const outcome = useVoiceStore((s) => s.outcome);
@@ -102,23 +102,22 @@ export function HomeScreen() {
       ].join(' ')}
     >
       <div className="flex w-full max-w-stage flex-col items-center">
-        <Orb
-          state={state}
-          onActivate={session.toggle}
-          levels={levels ?? undefined}
-          reducedMotion={reducedMotion}
-        />
+        {/* The visualiser subscribes to the microphone bus directly, so live
+            audio drives it without re-rendering this screen. */}
+        <Orb state={state} onActivate={session.toggle} reducedMotion={reducedMotion} />
 
         {/* Fixed height so a state change cannot shift the layout. */}
         {/* Reserved height so a state change cannot shift the layout. */}
-        <div className="mt-space-md flex min-h-[92px] flex-col items-center text-center">
+        <div className="orb-status mt-space-md flex min-h-[92px] flex-col items-center text-center">
           <h1 className="font-display text-headline-md text-on-surface sm:text-headline-lg" aria-live={def.announce}>
             {def.label}
           </h1>
-          <p className="mt-1 max-w-[36ch] font-body text-body-md text-on-surface-variant">{hint}</p>
+          <p className="orb-hint mt-1 max-w-[36ch] font-body text-body-md text-on-surface-variant">
+            {hint}
+          </p>
         </div>
 
-        <ListeningControls controls={controls} />
+        <ListeningControls controls={controls} reserveHeight={!panelOpen} />
 
         <VoicePanel session={session} onUseText={() => setTyping(true)} />
 
@@ -137,7 +136,7 @@ export function HomeScreen() {
             <button
               type="button"
               onClick={() => setTyping(true)}
-              className="flex h-9 items-center gap-1.5 rounded-full px-3 text-on-surface-variant transition-colors hover:text-on-surface"
+              className="flex h-11 items-center gap-1.5 rounded-full px-4 text-on-surface-variant transition-colors hover:text-on-surface"
             >
               <Icon name="rule" size={15} />
               <span className="font-display text-label-md">Type instead</span>

@@ -37,7 +37,7 @@ export const unavailableWakeWord: WakeWordProvider = {
   ),
   phrase: 'Hey Devyora',
   status: () => 'unavailable',
-  arm: async () => 'unavailable',
+  arm: () => Promise.resolve<WakeWordStatus>('unavailable'),
   disarm: () => undefined,
 };
 

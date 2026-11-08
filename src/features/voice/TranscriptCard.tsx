@@ -42,7 +42,7 @@ export function TranscriptCard({ transcript, interim, source, sttInfo }: Transcr
 
       <p
         className={[
-          'font-display text-headline-sm leading-snug',
+          'transcript-text font-display text-headline-sm leading-snug',
           settled ? 'text-on-surface' : 'text-on-surface-variant',
         ].join(' ')}
       >

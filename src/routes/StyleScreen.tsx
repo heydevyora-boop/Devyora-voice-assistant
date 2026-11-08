@@ -127,7 +127,7 @@ export function StyleScreen() {
     <section className="mx-auto min-h-[100dvh] w-full max-w-workspace px-margin-sm pb-56 pt-20">
       <div className="mx-auto grid w-full max-w-[720px] gap-space-md lg:max-w-[1100px] lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
         {/* ---------------- live preview ---------------- */}
-        <div className="lg:sticky lg:top-24">
+        <div className="min-w-0 lg:sticky lg:top-24">
           <GlassCard className="flex flex-col items-center p-space-md">
             <div className="mb-space-xs flex w-full items-center justify-between">
               <span className="flex items-center gap-1.5 rounded-full bg-surface-container-high/80 px-3 py-1">
@@ -140,7 +140,7 @@ export function StyleScreen() {
                 type="button"
                 onClick={() => setDraft(DEFAULT_APPEARANCE)}
                 disabled={isDefault}
-                className="flex h-9 items-center gap-1.5 rounded-full bg-surface-container-high/80 px-3 text-on-surface-variant transition-colors hover:text-on-surface disabled:opacity-40"
+                className="flex h-11 items-center gap-1.5 rounded-full bg-surface-container-high/80 px-4 text-on-surface-variant transition-colors hover:text-on-surface disabled:opacity-40"
               >
                 <Icon name="retry" size={15} />
                 <span className="font-display text-label-md">Reset</span>
@@ -166,7 +166,7 @@ export function StyleScreen() {
         </div>
 
         {/* ---------------- controls ---------------- */}
-        <div className="flex flex-col gap-space-md">
+        <div className="flex min-w-0 flex-col gap-space-md">
           <SectionCard title="Presets" tag={`${PRESETS.length} handcrafted`} glyph="orb">
             <div className="flex flex-wrap gap-space-xs">
               {PRESETS.map((p) => {
@@ -178,7 +178,7 @@ export function StyleScreen() {
                     aria-pressed={active}
                     onClick={() => setDraft(p.appearance)}
                     className={[
-                      'flex h-9 items-center gap-1.5 rounded-full px-3 transition-colors',
+                      'flex h-11 items-center gap-1.5 rounded-full px-4 transition-colors',
                       active
                         ? 'bg-surface-container-highest text-on-surface'
                         : 'bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface',
@@ -299,7 +299,7 @@ export function StyleScreen() {
                     aria-pressed={active}
                     onClick={() => set('size', s)}
                     className={[
-                      'h-10 rounded-full font-display text-label-md transition-colors',
+                      'h-11 rounded-full font-display text-label-md transition-colors',
                       active
                         ? 'bg-primary font-semibold text-on-primary'
                         : 'bg-surface-container-high/60 text-on-surface-variant hover:text-on-surface',
@@ -311,7 +311,7 @@ export function StyleScreen() {
               })}
             </div>
 
-            <div className="flex flex-col gap-space-md">
+            <div className="flex min-w-0 flex-col gap-space-md">
               <Slider label="Glow intensity" value={draft.glow} min={10} max={100} suffix="%" onChange={(v) => set('glow', v)} />
               <Slider label="Transparency" value={draft.alpha} min={20} max={100} suffix="%" onChange={(v) => set('alpha', v)} />
             </div>
@@ -328,7 +328,7 @@ export function StyleScreen() {
                     aria-pressed={active}
                     onClick={() => set('rim', r.id)}
                     className={[
-                      'flex h-10 items-center justify-between rounded-full px-space-md transition-colors',
+                      'flex h-11 items-center justify-between rounded-full px-space-md transition-colors',
                       active ? 'bg-surface-container-highest text-primary' : 'bg-surface-container-high/50 text-on-surface-variant hover:text-on-surface',
                     ].join(' ')}
                   >
@@ -429,7 +429,7 @@ export function StyleScreen() {
 
       <Link
         to="/"
-        className="mx-auto mt-space-md flex h-10 w-fit items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
+        className="mx-auto mt-space-md flex h-11 w-fit items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
       >
         <Icon name="orb" size={16} />
         <span className="font-display text-label-md">Back to the orb</span>

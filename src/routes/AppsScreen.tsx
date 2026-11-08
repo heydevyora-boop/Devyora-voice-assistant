@@ -115,9 +115,9 @@ export function AppsScreen() {
                 type="button"
                 onClick={() => setNotice(null)}
                 aria-label="Dismiss"
-                className="-m-1 shrink-0 rounded-full p-1 text-on-surface-variant hover:text-on-surface"
+                className="-m-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:text-on-surface"
               >
-                <Icon name="close" size={15} />
+                <Icon name="close" size={16} />
               </button>
             </div>
           </GlassCard>
@@ -150,7 +150,7 @@ export function AppsScreen() {
 
         <Link
           to="/"
-          className="mt-space-md inline-flex h-10 items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
+          className="mt-space-md inline-flex h-11 items-center gap-1.5 rounded-full bg-surface-container-high px-5 text-on-surface-variant transition-colors hover:text-on-surface"
         >
           <Icon name="orb" size={16} />
           <span className="font-display text-label-md">Back to the orb</span>

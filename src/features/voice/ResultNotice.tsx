@@ -44,7 +44,7 @@ export function ResultNotice({ outcome, onDismiss }: ResultNoticeProps) {
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="-m-1 shrink-0 rounded-full p-1 text-on-surface-variant transition-colors hover:text-on-surface"
+          className="-m-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:text-on-surface"
         >
           <Icon name="close" size={16} />
         </button>

@@ -21,7 +21,8 @@ export function createMockStt(script: string): SttProvider {
     info: INFO,
     isSupported: () => true,
 
-    start: async (handlers: SttHandlers): Promise<SttSession> => {
+    // Synchronous to set up; promise-returning because a real engine is not.
+    start: (handlers: SttHandlers): Promise<SttSession> => {
       const words = script.split(' ');
       let index = 0;
       let cancelled = false;
@@ -46,7 +47,7 @@ export function createMockStt(script: string): SttProvider {
         timer = null;
       };
 
-      return {
+      return Promise.resolve({
         stop: () => {
           if (cancelled) return;
           clear();
@@ -57,7 +58,7 @@ export function createMockStt(script: string): SttProvider {
           clear();
           handlers.onEnd();
         },
-      };
+      });
     },
   };
 }

@@ -3,12 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Devyora — a personal AI voice assistant built around one consistent floating orb.",
+  "description": "Devyora \u2014 a personal AI voice assistant built around one consistent floating orb.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "lint": "eslint .",
+    "test": "node tests/run.mjs",
+    "test:orb": "node tests/orb.test.mjs",
+    "test:voice": "node tests/voice.test.mjs",
+    "test:surfaces": "node tests/surfaces.test.mjs",
+    "test:responsive": "node tests/responsive.test.mjs"
   },
   "dependencies": {
     "react": "18.3.1",
@@ -17,14 +23,20 @@
     "zustand": "4.5.5"
   },
   "devDependencies": {
+    "@eslint/js": "^9.17.0",
     "@types/node": "^22.9.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "10.4.20",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.17",
     "typescript": "5.6.3",
+    "typescript-eslint": "^8.18.2",
     "vite": "5.4.11"
   }
 }

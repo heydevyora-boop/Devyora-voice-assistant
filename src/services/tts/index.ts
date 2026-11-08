@@ -21,7 +21,7 @@ export const webSpeechTts: TtsProvider = {
   isSupported: () =>
     typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window,
 
-  speak: (text: string) =>
+  speak: (text: string): Promise<void> =>
     new Promise<void>((resolve) => {
       if (!webSpeechTts.isSupported() || !text.trim()) {
         resolve();
@@ -45,7 +45,7 @@ export const webSpeechTts: TtsProvider = {
 export const silentTts: TtsProvider = {
   info: NO_PROVIDER('No speech output', 'This device has no speech synthesiser, so replies are shown as text only.'),
   isSupported: () => false,
-  speak: async () => undefined,
+  speak: () => Promise.resolve(),
   cancel: () => undefined,
 };
 

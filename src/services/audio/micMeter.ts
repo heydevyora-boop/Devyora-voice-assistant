@@ -95,10 +95,15 @@ export async function startMicMeter({ barCount, onLevels, onError }: MicMeterOpt
   frame = requestAnimationFrame(tick);
 
   // Losing the device mid-session is a real failure, not silence.
+  // The AbortController detaches these listeners on stop, so nothing holds a
+  // reference to the caller's closure once the meter is finished with.
+  const listeners = new AbortController();
   stream.getAudioTracks().forEach((track) => {
-    track.addEventListener('ended', () => {
-      onError?.(new MicError('audio-capture', 'The microphone was disconnected.'));
-    });
+    track.addEventListener(
+      'ended',
+      () => onError?.(new MicError('audio-capture', 'The microphone was disconnected.')),
+      { signal: listeners.signal },
+    );
   });
 
   return {
@@ -107,6 +112,7 @@ export async function startMicMeter({ barCount, onLevels, onError }: MicMeterOpt
       stopped = true;
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
+      listeners.abort();
       source.disconnect();
       analyser.disconnect();
       stream.getTracks().forEach((t) => t.stop());
