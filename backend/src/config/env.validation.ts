@@ -48,6 +48,19 @@ export const envSchema = z.object({
     .transform((v) => v === 'true'),
   SWAGGER_PATH: z.string().min(1).default('docs'),
 
+  // ── AI providers ──
+  // No credential is required: without one the registry selects the local
+  // stand-in and says so, rather than failing to boot.
+  AI_PROVIDER: z.enum(['mock', 'openai', 'gemini']).default('mock'),
+  AI_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(20_000),
+  AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
+  /** How many prior messages are replayed as context. */
+  AI_CONTEXT_MESSAGES: z.coerce.number().int().min(0).max(40).default(10),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
+
   // ── Reserved for later chunks; absent is valid today. ──
   JWT_ACCESS_SECRET: z.string().optional(),
   JWT_ACCESS_TTL: z.string().default('10m'),

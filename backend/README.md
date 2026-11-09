@@ -73,8 +73,9 @@ src/
 ├── common/      envelope, errors, filters, interceptors, pipes, decorators,
 │                request context (correlation id)
 ├── database/    Prisma service, lifecycle, transactions, tenant scoping
-├── modules/     feature modules — health today
-├── providers/   external adapters: LLM, speech, OAuth        (Chunks 5, 7, 8)
+├── modules/     feature modules — health, auth, users, devices,
+│                ai, conversations, assistant
+├── providers/   external adapters: LLM today; speech, OAuth  (Chunks 7, 8)
 ├── gateways/    WebSocket                                     (Chunk 6)
 ├── jobs/        BullMQ queues and processors                  (Chunk 6)
 ├── events/      in-process domain events                      (Chunk 6)
@@ -128,6 +129,22 @@ rather than destroyed.
 **Migrations never run at boot.** Two replicas starting together must not race
 on the same schema, so `migrate:deploy` is a separate pre-deploy step. The
 Dockerfile's `CMD` starts the server and nothing else.
+
+**The model never decides anything that matters.** It classifies an
+utterance and extracts entities. Permission, confirmation policy and action
+routing are read from `modules/ai/capability-registry.ts`, and the output
+schema has no field in which a model could claim otherwise. See
+[docs/assistant-engine.md](docs/assistant-engine.md).
+
+**Nothing claims success before it has happened.** There is no executor yet,
+so the assistant's status vocabulary contains no word meaning "done".
+Approving an action says, in as many words, that nothing has run.
+
+**No provider is hardcoded.** Every vendor sits behind `LlmProvider` in
+`providers/llm/`, and no vendor name appears above that directory. A provider
+with no credential is never selected: the deterministic stand-in is used
+instead, and readiness reports the interpreter as `degraded` so that is
+visible rather than silent.
 
 ## Security notes for later chunks
 

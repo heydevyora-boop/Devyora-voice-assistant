@@ -34,7 +34,19 @@ export interface DocsConfig {
 
 /** Provider settings arrive in later chunks; the namespace exists now so
  *  modules can depend on a stable shape rather than reaching for env. */
+export interface AiConfig {
+  readonly provider: 'mock' | 'openai' | 'gemini';
+  readonly timeoutMs: number;
+  readonly maxAttempts: number;
+  readonly contextMessages: number;
+  readonly openAiApiKey?: string;
+  readonly openAiModel: string;
+  readonly geminiApiKey?: string;
+  readonly geminiModel: string;
+}
+
 export interface ProvidersConfig {
+  readonly ai: AiConfig;
   readonly redisUrl?: string;
   readonly jwt: {
     readonly accessSecret?: string;
@@ -71,6 +83,16 @@ export function buildConfiguration(env: Env): Configuration {
     logging: { level: env.LOG_LEVEL, pretty: env.LOG_PRETTY },
     docs: { enabled: env.SWAGGER_ENABLED, path: env.SWAGGER_PATH },
     providers: {
+      ai: {
+        provider: env.AI_PROVIDER,
+        timeoutMs: env.AI_TIMEOUT_MS,
+        maxAttempts: env.AI_MAX_ATTEMPTS,
+        contextMessages: env.AI_CONTEXT_MESSAGES,
+        openAiApiKey: env.OPENAI_API_KEY,
+        openAiModel: env.OPENAI_MODEL,
+        geminiApiKey: env.GEMINI_API_KEY,
+        geminiModel: env.GEMINI_MODEL,
+      },
       redisUrl: env.REDIS_URL,
       jwt: {
         accessSecret: env.JWT_ACCESS_SECRET,

@@ -14,6 +14,10 @@ import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { DevicesModule } from './modules/devices/devices.module';
+import { LlmModule } from './providers/llm/llm.module';
+import { AiModule } from './modules/ai/ai.module';
+import { ConversationsModule } from './modules/conversations/conversations.module';
+import { AssistantModule } from './modules/assistant/assistant.module';
 
 /**
  * Composition root.
@@ -41,8 +45,14 @@ import { DevicesModule } from './modules/devices/devices.module';
     UsersModule,
     DevicesModule,
 
-    // Chunk 4: NotesModule, RemindersModule, PreferencesModule
-    // Chunk 5: AiModule, ConversationsModule
+    // The assistant. LlmModule is listed even though it is @Global, so the
+    // provider wiring is visible here rather than only by side effect.
+    LlmModule,
+    AiModule,
+    ConversationsModule,
+    AssistantModule,
+
+    // Chunk 5: NotesModule, RemindersModule, PreferencesModule
     // Chunk 6: ActionsModule, JobsModule, NotificationsModule
     // Chunk 7: VoiceModule, StorageModule
     // Chunk 8: ConnectionsModule

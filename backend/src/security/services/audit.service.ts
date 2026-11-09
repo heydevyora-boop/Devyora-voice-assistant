@@ -26,6 +26,13 @@ export const AuditAction = {
   DEVICE_REGISTERED: 'device.registered',
   DEVICE_UPDATED: 'device.updated',
   DEVICE_REVOKED: 'device.revoked',
+  // An AI-proposed action is recorded separately from a user action, and
+  // approval is recorded separately from execution, so a reader of this
+  // table can always tell which of the three actually happened.
+  ASSISTANT_TURN_FAILED: 'assistant.turn.failed',
+  ASSISTANT_ACTION_PROPOSED: 'assistant.action.proposed',
+  ASSISTANT_ACTION_APPROVED: 'assistant.action.approved',
+  ASSISTANT_ACTION_REJECTED: 'assistant.action.rejected',
 } as const;
 
 export type AuditActionValue = (typeof AuditAction)[keyof typeof AuditAction];

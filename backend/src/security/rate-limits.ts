@@ -29,6 +29,12 @@ export const RateLimit = {
   passwordResetConfirm: { ttl: 300_000, limit: scale(5) },
   emailVerify: { ttl: 300_000, limit: scale(10) },
   emailVerifyResend: { ttl: 300_000, limit: scale(3) },
+
+  /// An assistant turn costs a provider call, so this ceiling is about
+  /// spend as much as abuse: generous for a person talking, far below what
+  /// a script could run up.
+  assistantTurn: { ttl: 60_000, limit: scale(30) },
+  assistantDecision: { ttl: 60_000, limit: scale(60) },
 } as const;
 
 /** A deliberately tiny limit the rate-limit test can target. */
