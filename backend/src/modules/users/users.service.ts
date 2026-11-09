@@ -148,7 +148,15 @@ export class UsersService {
         }),
         this.prisma.note.findMany({
           where: { userId, deletedAt: null },
-          select: { text: true, pinned: true, createdAt: true, updatedAt: true },
+          select: {
+            title: true,
+            content: true,
+            source: true,
+            language: true,
+            pinned: true,
+            createdAt: true,
+            updatedAt: true,
+          },
         }),
         this.prisma.reminder.findMany({
           where: { userId, deletedAt: null },

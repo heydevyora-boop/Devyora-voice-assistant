@@ -27,6 +27,13 @@ export default defineConfig({
       // shipped one; only the deadlines differ.
       ACTION_TIMEOUT_MS: '1200',
       ACTION_STALE_CLAIM_MS: '2000',
+      // A separate Redis database, so a test run never touches the jobs a
+      // development instance has queued.
+      REDIS_URL: 'redis://127.0.0.1:6379/1',
+      // The workers run — that is the point — but the recurring sweep does
+      // not, so a cleanup job cannot fire underneath a test. The jobs spec
+      // triggers each handler explicitly instead.
+      JOBS_MAINTENANCE_ENABLED: 'false',
     },
     include: ['test/**/*.spec.ts', 'src/**/*.spec.ts'],
     // Integration specs share one database; serial avoids cross-talk.

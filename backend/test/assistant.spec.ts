@@ -108,7 +108,7 @@ describe('assistant orchestration', () => {
       const saved = await prisma.note.findFirstOrThrow({
         where: { id: result.execution!.resultRef!, userId: account.userId },
       });
-      expect(saved.text).toBe('buy milk on the way home');
+      expect(saved.content).toBe('buy milk on the way home');
 
       const row = await prisma.pendingAction.findUniqueOrThrow({
         where: { id: result.plan!.pendingActionId },

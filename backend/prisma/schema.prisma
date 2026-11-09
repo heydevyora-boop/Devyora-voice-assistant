@@ -123,6 +123,7 @@ enum ExecutionStatus {
 
 enum ReminderStatus {
   SCHEDULED
+  SNOOZED
   FIRED
   DONE
   CANCELLED
@@ -178,6 +179,27 @@ enum AudioRetention {
   RETAIN
 }
 
+/// Where a note came from. Recorded because a note dictated while driving
+/// and one typed deliberately deserve to be told apart in a list.
+enum NoteSource {
+  VOICE
+  MANUAL
+  IMPORT
+}
+
+/// What happened to one scheduled occurrence of a reminder.
+///
+/// DELIVERED means a notification was accepted by a transport, not that a
+/// person saw it. There is no status meaning "the user read it" here; that
+/// lives on the notification, where it can actually be observed.
+enum OccurrenceStatus {
+  SCHEDULED
+  DELIVERED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
 enum ConnectionProvider {
   WHATSAPP
   INSTAGRAM
@@ -200,10 +222,19 @@ enum NotificationChannel {
   IN_APP
 }
 
+/// A notification's lifecycle.
+///
+/// SENT means a transport accepted it. It does **not** mean a device showed
+/// it, and it certainly does not mean a person saw it — only READ comes
+/// close to that, and only because a client reports it. Nothing here is
+/// allowed to call scheduling "delivered".
 enum NotificationStatus {
   QUEUED
+  SENDING
   SENT
   FAILED
+  /// No transport exists for this user's devices, so it was never attempted.
+  UNDELIVERABLE
   READ
 }
 
@@ -247,21 +278,23 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  devices            Device[]
-  sessions           Session[]
-  conversations      Conversation[]
-  commands           AssistantCommand[]
-  pendingActions     PendingAction[]
-  voiceSessions      VoiceSession[]
-  audioAssets        AudioAsset[]
-  actionExecutions   ActionExecution[]
-  notes              Note[]
-  reminders          Reminder[]
-  connectedAccounts  ConnectedAccount[]
-  preference         UserPreference?
-  notifications      Notification[]
-  auditLogs          AuditLog[]
-  verificationTokens VerificationToken[]
+  devices             Device[]
+  sessions            Session[]
+  conversations       Conversation[]
+  commands            AssistantCommand[]
+  pendingActions      PendingAction[]
+  voiceSessions       VoiceSession[]
+  audioAssets         AudioAsset[]
+  actionExecutions    ActionExecution[]
+  reminderOccurrences ReminderOccurrence[]
+  syncCursors         SyncCursor[]
+  notes               Note[]
+  reminders           Reminder[]
+  connectedAccounts   ConnectedAccount[]
+  preference          UserPreference?
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  verificationTokens  VerificationToken[]
 
   @@index([deletedAt])
   @@index([status])
@@ -301,6 +334,7 @@ model Device {
   notifications  Notification[]
   voiceSessions  VoiceSession[]
   pendingActions PendingAction[]
+  syncCursors    SyncCursor[]
 
   @@index([userId, revokedAt])
   @@index([lastSeenAt])
@@ -698,25 +732,43 @@ model AudioAsset {
 }
 
 model Note {
-  id     String  @id @default(uuid()) @db.Uuid
-  userId String  @db.Uuid
-  text   String
-  pinned Boolean @default(false)
+  id      String  @id @default(uuid()) @db.Uuid
+  userId  String  @db.Uuid
+  /// Optional. A dictated note usually has none, and inventing one from the
+  /// first few words would put the assistant's guess in the user's data.
+  title   String? @db.VarChar(200)
+  content String
+  pinned  Boolean @default(false)
+
+  source   NoteSource @default(MANUAL)
+  /// BCP-47 tag of what the note is written in, as detected at the time.
+  /// Null when nothing detected it — not defaulted to English.
+  language String?    @db.VarChar(24)
 
   /// Client-generated id. Lets an offline device create a note and lets the
   /// existing browser-stored notes import exactly once.
-  clientId String? @db.VarChar(64)
-  /// Monotonic counter for last-write-wins conflict handling.
-  version  Int     @default(1)
+  clientId          String? @db.VarChar(64)
+  /// Incremented on every accepted change. The client sends the version it
+  /// based its edit on, and a mismatch is a conflict rather than an
+  /// overwrite — see `docs/sync-and-scheduling.md`.
+  version           Int     @default(1)
+  /// The device that last changed it, so a client can tell its own echo
+  /// from somebody else's edit.
+  updatedByDeviceId String? @db.Uuid
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  /// Soft delete. A deletion is a change like any other and has to travel
+  /// to the other devices, which it cannot do if the row is gone.
   deletedAt DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, clientId])
   @@index([userId, deletedAt, updatedAt(sort: Desc)])
+  /// The incremental sync query: everything this user changed since a point.
+  @@index([userId, updatedAt(sort: Asc)])
+  @@index([userId, pinned, deletedAt])
   @@map("notes")
 }
 
@@ -725,31 +777,80 @@ model Reminder {
   userId String @db.Uuid
   text   String
 
+  /// The next moment this should fire, as an instant. Always UTC in the
+  /// database; the wall-clock reading is derived from `timezone`.
   dueAt    DateTime
-  /// Stored alongside dueAt so a reminder fires at the right wall-clock time
-  /// even if the user travels.
+  /// The user's zone at the time the reminder was made, stored alongside
+  /// the instant so a recurring reminder keeps firing at the right
+  /// wall-clock time across a DST change — and so the two never disagree
+  /// about what "9am" meant.
   timezone String   @default("Asia/Kolkata") @db.VarChar(64)
   /// RFC 5545 recurrence rule, null for one-off reminders.
   rrule    String?  @db.VarChar(200)
 
   status  ReminderStatus @default(SCHEDULED)
-  /// Queue job handle, so rescheduling can cancel the previous job.
+  /// Queue job handle, so rescheduling can cancel the previous job and so
+  /// the reconciliation sweep can tell a scheduled reminder from one whose
+  /// job was lost.
   jobId   String?        @db.VarChar(100)
   firedAt DateTime?
 
-  clientId String? @db.VarChar(64)
-  version  Int     @default(1)
+  completedAt  DateTime?
+  /// Set while snoozed. `dueAt` moves with it; this records that the move
+  /// was a snooze rather than an edit.
+  snoozedUntil DateTime?
+  snoozeCount  Int       @default(0)
+
+  clientId          String? @db.VarChar(64)
+  version           Int     @default(1)
+  updatedByDeviceId String? @db.Uuid
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  occurrences ReminderOccurrence[]
 
   @@unique([userId, clientId])
   @@index([userId, status, dueAt])
   @@index([status, dueAt])
+  @@index([userId, updatedAt(sort: Asc)])
   @@map("reminders")
+}
+
+/// One firing of a reminder.
+///
+/// Recurring reminders need this: a weekly reminder is one row with an
+/// rrule, and "did Monday's go out?" is a question about an occurrence, not
+/// about the reminder. It is also what makes delivery history honest — the
+/// row says a notification was created, and the notification says what
+/// became of it.
+model ReminderOccurrence {
+  id         String @id @default(uuid()) @db.Uuid
+  reminderId String @db.Uuid
+  userId     String @db.Uuid
+
+  /// The instant this occurrence was for. Unique per reminder, which is
+  /// what stops a retry or a restart firing the same occurrence twice.
+  scheduledFor DateTime
+  status       OccurrenceStatus @default(SCHEDULED)
+
+  firedAt        DateTime?
+  notificationId String?   @db.Uuid
+  /// Normalised code. Never a provider message.
+  failureCode    String?   @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  reminder Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The deduplication guarantee: one occurrence per reminder per instant.
+  @@unique([reminderId, scheduledFor])
+  @@index([userId, scheduledFor(sort: Desc)])
+  @@index([status, scheduledFor])
+  @@map("reminder_occurrences")
 }
 
 /// An authorised third-party account.
@@ -823,9 +924,27 @@ model Notification {
   /// Routing payload for the client (deep link, entity ids).
   payload Json?
 
-  status        NotificationStatus @default(QUEUED)
+  status       NotificationStatus @default(QUEUED)
+  /// How many times a transport has been asked to take this.
+  attemptCount Int                @default(0)
+  /// Which provider accepted it, and its handle, where there is one.
+  providerId   String?            @db.VarChar(40)
+  providerRef  String?            @db.VarChar(200)
+
+  /// Caller-supplied. What stops one reminder occurrence producing two
+  /// notifications when a job is retried or a worker restarts.
+  ///
+  /// Unique **per account**, not globally: a global constraint would let one
+  /// user's key collide with another's, and the collision handler would
+  /// then hand back a notification belonging to someone else.
+  dedupeKey String? @db.VarChar(200)
+
+  /// Accepted by a transport. Deliberately not called `deliveredAt`: we
+  /// know it was taken, not that it arrived.
   sentAt        DateTime?
   readAt        DateTime?
+  /// Normalised code, e.g. `no_transport`. Never a provider message.
+  failureCode   String?   @db.VarChar(40)
   failureReason String?
 
   createdAt DateTime @default(now())
@@ -833,9 +952,43 @@ model Notification {
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
+  @@unique([userId, dedupeKey])
   @@index([userId, readAt])
   @@index([status, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("notifications")
+}
+
+/// What a device has already seen.
+///
+/// One row per device, holding the watermark an incremental sync reads from.
+/// Kept server-side as well as on the client because a reinstalled app has
+/// forgotten its cursor and needs somewhere to ask, and because a cursor the
+/// server issued is one the server can reason about.
+model SyncCursor {
+  userId   String @db.Uuid
+  deviceId String @db.Uuid
+
+  /// The high-water mark from the last successful pull. Everything changed
+  /// at or after this is what the device has not seen.
+  notesCursor     DateTime?
+  remindersCursor DateTime?
+
+  /// Bookkeeping, for the user's own "last synced" display.
+  lastPulledAt DateTime?
+  lastPushedAt DateTime?
+  /// How many records the device has pushed in total. Diagnostics only.
+  pushedCount  Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, deviceId])
+  @@index([userId])
+  @@map("sync_cursors")
 }
 
 /// Append-only. No update or delete path exists in application code.

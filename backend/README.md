@@ -74,7 +74,8 @@ src/
 │                request context (correlation id)
 ├── database/    Prisma service, lifecycle, transactions, tenant scoping
 ├── modules/     feature modules — health, auth, users, devices,
-│                ai, conversations, assistant, voice, actions
+│                ai, conversations, assistant, voice, actions,
+│                notes, reminders, sync, notifications
 ├── providers/   external adapters: shared reliability + error vocabulary,
 │                llm/, stt/, tts/; OAuth                      (Chunk 8)
 ├── gateways/    cross-module WebSocket fan-out                (Chunk 6)
@@ -179,6 +180,25 @@ read its own effect back. A hand-off reports `HANDOFF`, a timeout reports
 `UNVERIFIED`, and neither is ever presented as success — because for a
 message or an application launch, whether it worked is genuinely unknowable
 from here.
+
+**Conflicts are refused, not resolved by a clock.** Every synced record
+carries a server-owned `version`; a client sends the version its edit was
+based on, and a mismatch is a conflict with the server's copy returned rather
+than an overwrite. Omitting the version is the only way to win one, which
+makes overwriting somebody's work deliberate. Deletions travel as tombstones,
+because a device that was offline has to learn that something went. See
+[docs/sync-and-scheduling.md](docs/sync-and-scheduling.md).
+
+**Scheduling is durable or absent, never pretended.** Reminders are delayed
+jobs in Redis with Postgres as the source of truth, and a sweep re-enqueues
+anything whose job went missing — two systems cannot be written to
+atomically. With no Redis the reminder is still stored, `scheduled` reads
+false, and readiness says so.
+
+**Scheduling is not delivery.** A notification is `SENT` when a transport
+accepted it, `UNDELIVERABLE` when no transport exists, and `READ` only when a
+client says the person saw it. There is no `DELIVERED` status, because we
+cannot observe one.
 
 **The socket is judged like a request.** `PrincipalService` is the single
 implementation of "is this credential currently good", used by both the HTTP

@@ -123,6 +123,52 @@ export const envSchema = z.object({
    *  reconnecting client before the sweep removes it. */
   VOICE_SESSION_GRACE_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(900_000),
 
+  // ── Push notifications ──
+  // No credential is required. Without one there is no push transport:
+  // notifications still land in-app, and anything that cannot be delivered
+  // is recorded as undeliverable rather than reported as sent.
+  /** Comma-separated preference order, e.g. `fcm,apns`. */
+  PUSH_PREFERRED: z
+    .string()
+    .default('fcm,apns')
+    .transform((v) => v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)),
+  PUSH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
+  /** The service-account JSON document, as a single string. */
+  FCM_SERVICE_ACCOUNT: z.string().optional(),
+  APNS_KEY_ID: z.string().optional(),
+  APNS_TEAM_ID: z.string().optional(),
+  APNS_BUNDLE_ID: z.string().optional(),
+  /** The .p8 private key contents. */
+  APNS_PRIVATE_KEY: z.string().optional(),
+  APNS_SANDBOX: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  // ── Background work ──
+  /**
+   * Whether this instance installs the recurring maintenance schedule.
+   *
+   * Configuration rather than a constant because an operator may want one
+   * instance sweeping and the others only serving requests — and because a
+   * test suite wants the workers without a cleanup job firing underneath it.
+   */
+  JOBS_MAINTENANCE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+
+  // ── Reminders and sync ──
+  /** Default zone for an account that has not set one. */
+  DEFAULT_TIMEZONE: z.string().default('Asia/Kolkata'),
+  /** How long a soft-deleted note or reminder is kept, so an offline device
+   *  still learns it was deleted. */
+  SYNC_TOMBSTONE_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  /** Largest batch a client may push or pull in one request. */
+  SYNC_MAX_BATCH: z.coerce.number().int().min(1).max(500).default(200),
+  /** How far ahead the upcoming-reminders view looks, in days. */
+  REMINDER_UPCOMING_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
   // ── Reserved for later chunks; absent is valid today. ──
   JWT_ACCESS_SECRET: z.string().optional(),
   JWT_ACCESS_TTL: z.string().default('10m'),

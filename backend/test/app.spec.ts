@@ -122,7 +122,7 @@ describe('application', () => {
         data: {
           email: `cascade-${Date.now()}@test.local`,
           passwordHash: 'x',
-          notes: { create: { text: 'to be removed' } },
+          notes: { create: { content: 'to be removed' } },
         },
       });
 
@@ -167,9 +167,24 @@ describe('application', () => {
       expect(typeof body.checks.database.latencyMs).toBe('number');
     });
 
-    it('reports Redis as not-configured rather than failing readiness', async () => {
+    it('reports durable scheduling, and requires it when it is configured', async () => {
+      // This replaces an earlier placeholder that reported Redis as
+      // `not-configured` because nothing used it yet. Reminders use it now,
+      // so the check is real: `up` when it works, `down` when a configured
+      // Redis is unreachable, and `not-configured` only when nothing was
+      // promised in the first place.
       const body = (await request(http()).get('/health/ready').expect(200)).body as ReadinessBody;
-      expect(body.checks.redis.status).toBe('not-configured');
+
+      expect(body.checks.scheduler.status).toBe('up');
+      expect(body.status).toBe('ready');
+    });
+
+    it('does not let a push transport’s absence fail readiness', async () => {
+      // A notification with no transport is recorded as undeliverable and
+      // still appears in-app, so this must never hold an instance down.
+      const body = (await request(http()).get('/health/ready').expect(200)).body as ReadinessBody;
+      expect(body.checks.push.status).toBe('not-configured');
+      expect(body.status).toBe('ready');
     });
 
     it('does not disclose infrastructure details', async () => {

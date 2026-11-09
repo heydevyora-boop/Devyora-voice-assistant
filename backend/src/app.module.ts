@@ -19,6 +19,12 @@ import { AiModule } from './modules/ai/ai.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { AssistantModule } from './modules/assistant/assistant.module';
 import { ActionsModule } from './modules/actions/actions.module';
+import { PushModule } from './providers/push/push.module';
+import { JobsModule } from './jobs/jobs.module';
+import { NotesModule } from './modules/notes/notes.module';
+import { RemindersModule } from './modules/reminders/reminders.module';
+import { SyncModule } from './modules/sync/sync.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { SttModule } from './providers/stt/stt.module';
 import { TtsModule } from './providers/tts/tts.module';
 import { VoiceModule } from './modules/voice/voice.module';
@@ -62,7 +68,17 @@ import { VoiceModule } from './modules/voice/voice.module';
     TtsModule,
     VoiceModule,
 
-    // Chunk 6: NotesModule, RemindersModule, PreferencesModule
+    // Productivity: the user's own data, synchronised across their devices.
+    NotesModule,
+    RemindersModule,
+    SyncModule,
+
+    // Delivery. PushModule is global; listed so the wiring is visible here
+    // rather than only by side effect. JobsModule must come after the
+    // modules its workers consume.
+    PushModule,
+    NotificationsModule,
+    JobsModule,
     // Chunk 6: ActionsModule, JobsModule, NotificationsModule
     // Chunk 7: VoiceModule, StorageModule
     // Chunk 8: ConnectionsModule

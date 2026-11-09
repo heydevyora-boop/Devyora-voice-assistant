@@ -4,6 +4,8 @@ import { PrismaService } from '../../database/prisma.service';
 import { LlmRegistry } from '../../providers/llm/llm.module';
 import { SttRegistry } from '../../providers/stt/stt.module';
 import { TtsRegistry } from '../../providers/tts/tts.module';
+import { PushRegistry } from '../../providers/push/push.module';
+import { QueueService } from '../../jobs/queue.service';
 
 export type DependencyState = 'up' | 'down' | 'not-configured';
 
@@ -39,21 +41,14 @@ export class HealthService {
     private readonly llm: LlmRegistry,
     private readonly stt: SttRegistry,
     private readonly tts: TtsRegistry,
+    private readonly push: PushRegistry,
+    private readonly queue: QueueService,
   ) {}
 
   async checkDatabase(): Promise<DependencyReport> {
     const startedAt = Date.now();
     const ok = await this.prisma.ping();
     return ok ? { status: 'up', latencyMs: Date.now() - startedAt } : { status: 'down' };
-  }
-
-  /**
-   * Redis arrives with the background-job work. Until it is configured this
-   * reports `not-configured`, which is honest and does not fail readiness —
-   * nothing depends on it yet.
-   */
-  checkRedis(): DependencyReport {
-    return this.config.providers.redisUrl ? { status: 'down' } : { status: 'not-configured' };
   }
 
   /**
@@ -114,18 +109,69 @@ export class HealthService {
     return { status: 'up', detail: `Synthesiser "${provider.id}" is configured.` };
   }
 
+  /**
+   * Durable scheduling.
+   *
+   * This one **can** fail readiness, unlike the provider stand-ins. A
+   * process with no queue does not deliver reminders, and a reminder that
+   * never arrives is a broken promise rather than a degraded feature — so
+   * an instance in that state should be taken out of rotation if another
+   * can serve. It reports `not-configured` rather than `down` when no
+   * REDIS_URL is set at all, because then nothing was promised.
+   */
+  checkScheduler(): DependencyReport {
+    if (!this.config.providers.redisUrl) {
+      return {
+        status: 'not-configured',
+        detail: 'No REDIS_URL: reminders are stored but will not be delivered.',
+      };
+    }
+    return this.queue.available
+      ? { status: 'up', detail: 'Durable scheduling is available.' }
+      : { status: 'down', detail: 'Redis is configured but unreachable.' };
+  }
+
+  /**
+   * Push transports.
+   *
+   * Never required: a notification with no transport is recorded as
+   * undeliverable and still appears in-app, so this cannot hold readiness
+   * down.
+   */
+  checkPush(): DependencyReport {
+    if (!this.push.hasRealTransport) {
+      return {
+        status: 'not-configured',
+        detail: 'No push transport; notifications are available in-app only.',
+      };
+    }
+    return {
+      status: 'up',
+      detail: `Transports: ${this.push
+        .list()
+        .filter((p) => p.kind === 'real' && p.configured)
+        .map((p) => p.id)
+        .join(', ')}.`,
+    };
+  }
+
   async readiness(): Promise<ReadinessReport> {
     const checks: Record<string, DependencyReport> = {
       database: await this.checkDatabase(),
-      redis: this.checkRedis(),
       interpreter: this.checkInterpreter(),
       recogniser: this.checkRecogniser(),
       synthesiser: this.checkSynthesiser(),
+      scheduler: this.checkScheduler(),
+      push: this.checkPush(),
     };
 
-    // Only a dependency the application actually requires can fail readiness.
-    const required: Array<keyof typeof checks> = ['database'];
-    const ready = required.every((key) => checks[key].status === 'up');
+    // Only a dependency the application actually requires can fail
+    // readiness, and only by being *down* — `not-configured` means nothing
+    // was promised. The scheduler is required because an instance that
+    // cannot deliver reminders is not serving the product, even though it
+    // can answer requests.
+    const required: Array<keyof typeof checks> = ['database', 'scheduler'];
+    const ready = required.every((key) => checks[key].status !== 'down');
 
     return { status: ready ? 'ready' : 'degraded', checks };
   }

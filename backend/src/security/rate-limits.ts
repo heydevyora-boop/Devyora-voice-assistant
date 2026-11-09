@@ -48,6 +48,11 @@ export const RateLimit = {
   /// duplicate guard — that is the idempotency key — but it bounds how fast
   /// a compromised client could work through a list of proposals.
   actionExecute: { ttl: 60_000, limit: scale(30) },
+
+  /// Sync is chatty by nature — a device catching up pulls repeatedly — so
+  /// these are generous. The batch size limit is the real bound on work.
+  syncPull: { ttl: 60_000, limit: scale(120) },
+  syncPush: { ttl: 60_000, limit: scale(60) },
 } as const;
 
 /** A deliberately tiny limit the rate-limit test can target. */

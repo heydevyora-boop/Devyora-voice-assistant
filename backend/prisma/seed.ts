@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   await prisma.note.upsert({
     where: { userId_clientId: { userId: user.id, clientId: 'seed-note-1' } },
     update: {},
-    create: { userId: user.id, clientId: 'seed-note-1', text: 'Buy oat milk' },
+    create: { userId: user.id, clientId: 'seed-note-1', content: 'Buy oat milk' },
   });
 
   const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);

@@ -1,4 +1,4 @@
-import { ActionKind, ExecutionMode } from '@prisma/client';
+import { ActionKind, ExecutionMode, NoteSource } from '@prisma/client';
 import { z } from 'zod';
 import type { ActionDefinition, AnyActionDefinition } from '../registry/types';
 
@@ -64,13 +64,18 @@ const create: ActionDefinition<z.infer<typeof createInput>, z.infer<typeof creat
     const note = input.clientId
       ? await prisma.note.upsert({
           where: { userId_clientId: { userId: context.userId, clientId: input.clientId } },
-          create: { userId: context.userId, text: input.text, clientId: input.clientId },
-          update: { text: input.text, version: { increment: 1 }, deletedAt: null },
-          select: { id: true, text: true, createdAt: true },
+          create: {
+            userId: context.userId,
+            content: input.text,
+            clientId: input.clientId,
+            source: NoteSource.VOICE,
+          },
+          update: { content: input.text, version: { increment: 1 }, deletedAt: null },
+          select: { id: true, content: true, createdAt: true },
         })
       : await prisma.note.create({
-          data: { userId: context.userId, text: input.text },
-          select: { id: true, text: true, createdAt: true },
+          data: { userId: context.userId, content: input.text, source: NoteSource.VOICE },
+          select: { id: true, content: true, createdAt: true },
         });
 
     // Read back, rather than trusting the write. This is what earns
@@ -78,7 +83,7 @@ const create: ActionDefinition<z.infer<typeof createInput>, z.infer<typeof creat
     // in a database this server controls.
     const stored = await prisma.note.findFirst({
       where: { id: note.id, userId: context.userId, deletedAt: null },
-      select: { id: true, text: true, createdAt: true },
+      select: { id: true, content: true, createdAt: true },
     });
 
     if (!stored) {
@@ -98,7 +103,7 @@ const create: ActionDefinition<z.infer<typeof createInput>, z.infer<typeof creat
       resultRef: stored.id,
       result: {
         noteId: stored.id,
-        text: stored.text,
+        text: stored.content,
         createdAt: stored.createdAt.toISOString(),
       },
     };
@@ -133,13 +138,13 @@ const search: ActionDefinition<z.infer<typeof searchInput>, z.infer<typeof searc
       deletedAt: null,
       // Case-insensitive contains. Not a user-supplied expression: Prisma
       // parameterises it, so there is no pattern injection to worry about.
-      ...(input.query ? { text: { contains: input.query, mode: 'insensitive' as const } } : {}),
+      ...(input.query ? { content: { contains: input.query, mode: 'insensitive' as const } } : {}),
     };
 
     const [rows, total] = await Promise.all([
       prisma.note.findMany({
         where,
-        select: { id: true, text: true, createdAt: true },
+        select: { id: true, content: true, createdAt: true },
         orderBy: { updatedAt: 'desc' },
         take: input.limit,
       }),
@@ -153,7 +158,7 @@ const search: ActionDefinition<z.infer<typeof searchInput>, z.infer<typeof searc
       result: {
         notes: rows.map((r) => ({
           noteId: r.id,
-          text: r.text,
+          text: r.content,
           createdAt: r.createdAt.toISOString(),
         })),
         total,

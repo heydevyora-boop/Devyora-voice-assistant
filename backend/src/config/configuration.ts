@@ -78,6 +78,28 @@ export interface ActionsConfig {
   readonly confirmationTtlMs: number;
 }
 
+export interface PushConfig {
+  readonly preferred: readonly string[];
+  readonly timeoutMs: number;
+  readonly fcmServiceAccount?: string;
+  readonly apnsKeyId?: string;
+  readonly apnsTeamId?: string;
+  readonly apnsBundleId?: string;
+  readonly apnsPrivateKey?: string;
+  readonly apnsSandbox: boolean;
+}
+
+export interface JobsConfig {
+  readonly maintenanceEnabled: boolean;
+}
+
+export interface ProductivityConfig {
+  readonly defaultTimezone: string;
+  readonly tombstoneDays: number;
+  readonly syncMaxBatch: number;
+  readonly upcomingDays: number;
+}
+
 export interface VoiceConfig {
   readonly sessionTtlMs: number;
   readonly sessionGraceMs: number;
@@ -90,6 +112,9 @@ export interface ProvidersConfig {
   readonly audio: AudioConfig;
   readonly voice: VoiceConfig;
   readonly actions: ActionsConfig;
+  readonly push: PushConfig;
+  readonly productivity: ProductivityConfig;
+  readonly jobs: JobsConfig;
   readonly redisUrl?: string;
   readonly jwt: {
     readonly accessSecret?: string;
@@ -168,6 +193,23 @@ export function buildConfiguration(env: Env): Configuration {
         timeoutMs: env.ACTION_TIMEOUT_MS,
         staleClaimMs: env.ACTION_STALE_CLAIM_MS,
         confirmationTtlMs: env.ACTION_CONFIRMATION_TTL_MS,
+      },
+      push: {
+        preferred: env.PUSH_PREFERRED,
+        timeoutMs: env.PUSH_TIMEOUT_MS,
+        fcmServiceAccount: env.FCM_SERVICE_ACCOUNT,
+        apnsKeyId: env.APNS_KEY_ID,
+        apnsTeamId: env.APNS_TEAM_ID,
+        apnsBundleId: env.APNS_BUNDLE_ID,
+        apnsPrivateKey: env.APNS_PRIVATE_KEY,
+        apnsSandbox: env.APNS_SANDBOX,
+      },
+      jobs: { maintenanceEnabled: env.JOBS_MAINTENANCE_ENABLED },
+      productivity: {
+        defaultTimezone: env.DEFAULT_TIMEZONE,
+        tombstoneDays: env.SYNC_TOMBSTONE_DAYS,
+        syncMaxBatch: env.SYNC_MAX_BATCH,
+        upcomingDays: env.REMINDER_UPCOMING_DAYS,
       },
       redisUrl: env.REDIS_URL,
       jwt: {
