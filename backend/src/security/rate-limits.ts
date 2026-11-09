@@ -35,6 +35,14 @@ export const RateLimit = {
   /// a script could run up.
   assistantTurn: { ttl: 60_000, limit: scale(30) },
   assistantDecision: { ttl: 60_000, limit: scale(60) },
+
+  /// Opening a session is cheap; the work happens later.
+  voiceSessionStart: { ttl: 60_000, limit: scale(60) },
+  /// A turn costs an interpretation. Same reasoning as assistantTurn.
+  voiceTurn: { ttl: 60_000, limit: scale(30) },
+  /// An upload costs a transcription as well, and moves real bytes, so it
+  /// is the tightest ceiling here.
+  voiceAudioUpload: { ttl: 60_000, limit: scale(20) },
 } as const;
 
 /** A deliberately tiny limit the rate-limit test can target. */

@@ -18,6 +18,9 @@ import { LlmModule } from './providers/llm/llm.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { AssistantModule } from './modules/assistant/assistant.module';
+import { SttModule } from './providers/stt/stt.module';
+import { TtsModule } from './providers/tts/tts.module';
+import { VoiceModule } from './modules/voice/voice.module';
 
 /**
  * Composition root.
@@ -52,7 +55,12 @@ import { AssistantModule } from './modules/assistant/assistant.module';
     ConversationsModule,
     AssistantModule,
 
-    // Chunk 5: NotesModule, RemindersModule, PreferencesModule
+    // Voice: recognition, synthesis, sessions and the realtime gateway.
+    SttModule,
+    TtsModule,
+    VoiceModule,
+
+    // Chunk 6: NotesModule, RemindersModule, PreferencesModule
     // Chunk 6: ActionsModule, JobsModule, NotificationsModule
     // Chunk 7: VoiceModule, StorageModule
     // Chunk 8: ConnectionsModule

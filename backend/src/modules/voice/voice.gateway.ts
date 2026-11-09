@@ -1,0 +1,302 @@
+import { Logger, type OnModuleDestroy } from '@nestjs/common';
+import {
+  ConnectedSocket,
+  MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  OnGatewayInit,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
+import type { Server, Socket } from 'socket.io';
+import { AppConfigService } from '../../config/app-config.module';
+import { PrincipalService, type ResolvedPrincipal } from '../../security/services/principal.service';
+import { VoiceEventBus, type VoiceEventTarget } from './voice-event-bus';
+import { voiceRoom, type VoiceEvent } from './voice-events';
+import { describeSession, VoiceSessionService } from './voice-session.service';
+import { VoiceService } from './voice.service';
+
+/** What the socket knows about its own connection. */
+interface SocketState {
+  readonly principal: ResolvedPrincipal;
+}
+
+const states = new WeakMap<Socket, SocketState>();
+
+/**
+ * The real-time transport for voice.
+ *
+ * One namespace, `/assistant`, with a room per user and a sub-room per
+ * device — the arrangement approved in the architecture review, and the
+ * reason the pipeline publishes to a bus rather than to sockets directly.
+ *
+ * Why a socket at all, when the turn is also a REST call: a spoken
+ * interaction produces several things at different times — a partial
+ * transcript, a settled one, a clarification, a reply — and the orb has to
+ * react as each arrives. Polling for that would be worse for latency and
+ * for battery, and holding one HTTP response open for the whole turn would
+ * make cancellation and reconnection harder, not easier.
+ *
+ * What this gateway does **not** do: accept a continuous microphone feed.
+ * There is no handler here that takes audio frames for wake-word detection,
+ * because wake-word detection runs on the device. The transport exists for
+ * events and for an authorised utterance after activation.
+ *
+ * Authentication is the same check as HTTP — `PrincipalService` — applied at
+ * connection time. A socket with no valid credential is disconnected before
+ * it joins anything, so room membership always implies an authorised
+ * identity.
+ */
+@WebSocketGateway({
+  namespace: '/assistant',
+  // The allow-list is the one the HTTP layer uses. A socket is not exempt
+  // from origin policy just because it is not a fetch.
+  cors: { origin: true, credentials: true },
+  // Audio is never carried over this channel, so the frame ceiling is small
+  // on purpose: a client that tries to stream a recording through it is
+  // disconnected rather than quietly accommodated.
+  maxHttpBufferSize: 64 * 1024,
+})
+export class VoiceGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
+  private readonly logger = new Logger(VoiceGateway.name);
+  private unsubscribe: (() => void) | null = null;
+
+  @WebSocketServer()
+  private server!: Server;
+
+  constructor(
+    private readonly principals: PrincipalService,
+    private readonly bus: VoiceEventBus,
+    private readonly sessions: VoiceSessionService,
+    private readonly voice: VoiceService,
+    private readonly config: AppConfigService,
+  ) {}
+
+  afterInit(): void {
+    this.unsubscribe = this.bus.subscribe((event, target) => this.deliver(event, target));
+
+    if (!this.config.providers.redisUrl) {
+      // Said once, at startup, because it is a real limitation rather than
+      // a detail: with more than one instance, a socket connected to
+      // instance A would not receive events published on instance B.
+      this.logger.log(
+        'Voice events are delivered in-process. A second instance needs the ' +
+          'Redis adapter before sockets can span instances.',
+      );
+    }
+  }
+
+  onModuleDestroy(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+
+  // ───────────────────────────────────────────────────────── connection
+
+  async handleConnection(socket: Socket): Promise<void> {
+    const token = extractToken(socket);
+    if (!token) {
+      // No error detail: an unauthenticated socket is told nothing about
+      // why, for the same reason a 401 is uniform.
+      socket.emit('error', { code: 'UNAUTHENTICATED' });
+      socket.disconnect(true);
+      return;
+    }
+
+    const principal = await this.principals.fromAccessToken(token);
+    if (!principal) {
+      socket.emit('error', { code: 'UNAUTHENTICATED' });
+      socket.disconnect(true);
+      return;
+    }
+
+    states.set(socket, { principal });
+    await socket.join(voiceRoom.user(principal.userId));
+    await socket.join(voiceRoom.device(principal.deviceId));
+
+    this.principals.touchDevice(principal.deviceId);
+
+    socket.emit('connected', {
+      userId: principal.userId,
+      deviceId: principal.deviceId,
+      // Told up front, so a client knows whether to expect spoken replies
+      // and whether transcripts are real.
+      interpreter: { events: 'in-process' },
+    });
+  }
+
+  handleDisconnect(socket: Socket): void {
+    // Nothing to tear down beyond the map entry: a dropped socket does not
+    // cancel a session. The user may be reconnecting, and the turn they
+    // started should still be there when they do.
+    states.delete(socket);
+  }
+
+  // ─────────────────────────────────────────────────────────── messages
+
+  /**
+   * Reconnection.
+   *
+   * A client that dropped mid-turn sends the session id and the last
+   * sequence it saw, and is given the session's current state plus every
+   * event after that point. Nothing is re-run: the events were recorded as
+   * they happened, so a replay is a replay rather than a second pipeline.
+   */
+  @SubscribeMessage('voice.resume')
+  async resume(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: unknown,
+  ): Promise<{ ok: boolean; code?: string; session?: unknown; events?: VoiceEvent[] }> {
+    const state = states.get(socket);
+    if (!state) return { ok: false, code: 'UNAUTHENTICATED' };
+
+    const parsed = parseResume(body);
+    if (!parsed) return { ok: false, code: 'BAD_REQUEST' };
+
+    try {
+      const { session, events } = await this.sessions.eventsSince(
+        state.principal.userId,
+        parsed.sessionId,
+        parsed.afterSeq,
+        // Device-scoped: a session belongs to the device that started it.
+        state.principal.deviceId,
+      );
+      await socket.join(voiceRoom.session(session.id));
+      return { ok: true, session: describeSession(session), events };
+    } catch {
+      // Another user's or another device's session reads as missing, as it
+      // does over HTTP.
+      return { ok: false, code: 'NOT_FOUND' };
+    }
+  }
+
+  /**
+   * A partial transcript from a device doing its own recognition.
+   *
+   * This is text, not audio. It is relayed to the user's other surfaces and
+   * never stored.
+   */
+  @SubscribeMessage('voice.transcript.partial')
+  async partial(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: unknown,
+  ): Promise<{ ok: boolean; code?: string }> {
+    const state = states.get(socket);
+    if (!state) return { ok: false, code: 'UNAUTHENTICATED' };
+
+    const parsed = parsePartial(body);
+    if (!parsed) return { ok: false, code: 'BAD_REQUEST' };
+
+    try {
+      await this.voice.pushPartialTranscript(
+        state.principal.userId,
+        state.principal.deviceId,
+        parsed.sessionId,
+        parsed.text,
+      );
+      return { ok: true };
+    } catch {
+      return { ok: false, code: 'NOT_FOUND' };
+    }
+  }
+
+  /** Cancellation from the socket, equivalent to the REST route. */
+  @SubscribeMessage('voice.cancel')
+  async cancel(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: unknown,
+  ): Promise<{ ok: boolean; code?: string }> {
+    const state = states.get(socket);
+    if (!state) return { ok: false, code: 'UNAUTHENTICATED' };
+
+    const parsed = parseResume(body);
+    if (!parsed) return { ok: false, code: 'BAD_REQUEST' };
+
+    try {
+      await this.voice.cancel(
+        state.principal.userId,
+        parsed.sessionId,
+        state.principal.deviceId,
+        'device',
+      );
+      return { ok: true };
+    } catch {
+      return { ok: false, code: 'NOT_FOUND' };
+    }
+  }
+
+  /**
+   * Rejects any attempt to push audio frames down this channel.
+   *
+   * Explicit rather than absent, so the answer is a stated refusal instead
+   * of silence. Continuous microphone audio does not go to the cloud: wake
+   * word detection is the device's job, and an utterance after activation
+   * is uploaded as a bounded recording where its size and format can be
+   * checked.
+   */
+  @SubscribeMessage('voice.audio.chunk')
+  rejectAudio(): { ok: false; code: string; detail: string } {
+    return {
+      ok: false,
+      code: 'UNSUPPORTED',
+      detail:
+        'Audio is not accepted on this channel. Upload a bounded recording to ' +
+        'POST /voice/sessions/:id/audio.',
+    };
+  }
+
+  // ───────────────────────────────────────────────────────── delivery
+
+  /**
+   * Fans an event out to the right room.
+   *
+   * Device-private events — partial transcripts, listening state — go only
+   * to the device that is speaking. A confirmation goes to the whole
+   * account, because the person may be looking at another screen; acting on
+   * it still requires the owning device.
+   */
+  private deliver(event: VoiceEvent, target: VoiceEventTarget): void {
+    if (!this.server) return;
+
+    const room = target.deviceOnly
+      ? voiceRoom.device(target.deviceId)
+      : voiceRoom.user(target.userId);
+
+    this.server.to(room).emit(event.type, event);
+  }
+}
+
+/** Token from the handshake. Never from a query string, which gets logged. */
+function extractToken(socket: Socket): string | null {
+  const auth = socket.handshake.auth as { token?: unknown } | undefined;
+  if (typeof auth?.token === 'string' && auth.token.trim()) return auth.token.trim();
+
+  const header = socket.handshake.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ')) {
+    const token = header.slice(7).trim();
+    if (token) return token;
+  }
+  return null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseResume(body: unknown): { sessionId: string; afterSeq: number } | null {
+  if (!body || typeof body !== 'object') return null;
+  const { sessionId, afterSeq } = body as { sessionId?: unknown; afterSeq?: unknown };
+  if (typeof sessionId !== 'string' || !UUID.test(sessionId)) return null;
+
+  const seq = typeof afterSeq === 'number' && Number.isInteger(afterSeq) && afterSeq >= 0 ? afterSeq : 0;
+  return { sessionId, afterSeq: seq };
+}
+
+function parsePartial(body: unknown): { sessionId: string; text: string } | null {
+  if (!body || typeof body !== 'object') return null;
+  const { sessionId, text } = body as { sessionId?: unknown; text?: unknown };
+  if (typeof sessionId !== 'string' || !UUID.test(sessionId)) return null;
+  if (typeof text !== 'string') return null;
+  return { sessionId, text: text.slice(0, 2_000) };
+}

@@ -103,6 +103,56 @@ enum ReminderStatus {
   CANCELLED
 }
 
+/// Where a voice session's audio came from.
+/// TEXT   — the device recognised speech itself and sent a transcript.
+///          This is what the web client does today.
+/// UPLOAD — the device sent a complete recording for the server to transcribe.
+/// STREAM — audio arrived over a WebSocket while the user was speaking.
+enum VoiceInputMode {
+  TEXT
+  UPLOAD
+  STREAM
+}
+
+/// A voice session's state. Transitions are validated against an explicit
+/// table in `voice-session.service.ts`; nothing moves a session by writing
+/// this column directly.
+enum VoiceSessionState {
+  CREATED
+  LISTENING
+  TRANSCRIBING
+  INTERPRETING
+  AWAITING_CLARIFICATION
+  AWAITING_CONFIRMATION
+  QUEUED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
+/// How long a recording is kept.
+/// DISCARD — deleted as soon as it has been transcribed. The default, and
+///           what happens unless the user has asked for something else.
+/// SESSION — kept until the voice session ends, so a retry does not need
+///           the user to speak again.
+/// RETAIN  — kept for the retention window the user chose.
+/// What a stored audio file is.
+/// INPUT  — the user's own speech, uploaded for recognition. Deleted as
+///          soon as it has been transcribed unless retention says otherwise.
+/// SPEECH — a synthesised reply. Not the user's voice, and kept only long
+///          enough for the client to play it.
+enum AudioKind {
+  INPUT
+  SPEECH
+}
+
+enum AudioRetention {
+  DISCARD
+  SESSION
+  RETAIN
+}
+
 enum ConnectionProvider {
   WHATSAPP
   INSTAGRAM
@@ -177,6 +227,8 @@ model User {
   conversations      Conversation[]
   commands           AssistantCommand[]
   pendingActions     PendingAction[]
+  voiceSessions      VoiceSession[]
+  audioAssets        AudioAsset[]
   notes              Note[]
   reminders          Reminder[]
   connectedAccounts  ConnectedAccount[]
@@ -221,6 +273,7 @@ model Device {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessions      Session[]
   notifications Notification[]
+  voiceSessions VoiceSession[]
 
   @@index([userId, revokedAt])
   @@index([lastSeenAt])
@@ -427,6 +480,133 @@ model ActionExecution {
 }
 
 // ───────────────────────────────────────────────────── capabilities
+
+// ───────────────────────────────────────────────────────────────── voice
+
+/// One spoken interaction, from activation to a settled outcome.
+///
+/// It owns the state machine the orb follows, and it is the join between a
+/// device, a recording, a transcript and whatever the assistant proposed.
+/// `deviceId` is not optional: a voice session always belongs to the device
+/// that started it, which is what stops another device acting on it.
+model VoiceSession {
+  id       String @id @default(uuid()) @db.Uuid
+  userId   String @db.Uuid
+  deviceId String @db.Uuid
+
+  state     VoiceSessionState @default(CREATED)
+  inputMode VoiceInputMode
+
+  /// Set when the device reports that a local wake word started this,
+  /// rather than a tap. Recorded for the user's own activity view; it is
+  /// never treated as authentication.
+  wakeWordTriggered Boolean @default(false)
+  /// BCP-47 hint the client supplied, e.g. `hi-IN`. Advisory: a provider
+  /// may detect something else, and the detected value wins.
+  languageHint      String? @db.VarChar(24)
+
+  /// The settled transcript. Partial text is pushed over the socket and
+  /// never stored: an interim guess is not a record of what was said.
+  transcript       String?
+  detectedLanguage String? @db.VarChar(24)
+  sttProviderId    String? @db.VarChar(40)
+  /// Provider confidence, where the provider reports one.
+  sttConfidence    Float?
+  sttLatencyMs     Int?
+
+  conversationId  String? @db.Uuid
+  commandId       String? @db.Uuid
+  pendingActionId String? @db.Uuid
+
+  /// The reply text. Stored so a reconnecting client can be told the
+  /// outcome without re-running anything.
+  replyText   String?
+  /// Normalised failure code, e.g. `audio_too_long`, `stt_timeout`. Never a
+  /// provider message: those go to the log.
+  failureCode String? @db.VarChar(40)
+
+  /// Sequence of the last event emitted, so a reconnecting client can ask
+  /// for everything after what it already has.
+  lastEventSeq Int       @default(0)
+  expiresAt    DateTime
+  endedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device              @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  events VoiceSessionEvent[]
+  audio  AudioAsset[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([deviceId, state])
+  /// The expiry sweep reads this.
+  @@index([expiresAt])
+  @@map("voice_sessions")
+}
+
+/// Append-only log of what a session emitted.
+///
+/// This is what makes reconnection work without replaying the pipeline: a
+/// client that dropped at sequence 4 asks for everything after 4. Partial
+/// transcripts are deliberately absent — they are pushed live and are not
+/// worth a row, nor worth keeping.
+model VoiceSessionEvent {
+  id             String @id @default(uuid()) @db.Uuid
+  voiceSessionId String @db.Uuid
+  /// Monotonic within a session, starting at 1.
+  seq            Int
+  type           String @db.VarChar(40)
+  /// Event payload as it was sent to the client.
+  payload        Json
+
+  createdAt DateTime @default(now())
+
+  session VoiceSession @relation(fields: [voiceSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([voiceSessionId, seq])
+  @@index([voiceSessionId, seq])
+  @@map("voice_session_events")
+}
+
+/// Metadata for a recording. The bytes are not here.
+///
+/// Audio lives on disk under a server-generated name and is deleted as soon
+/// as it has been transcribed, unless the user asked for something else.
+/// `storageKey` is null once the bytes are gone, so a row can say "this
+/// existed and was deleted" without implying the audio is still readable.
+model AudioAsset {
+  id             String  @id @default(uuid()) @db.Uuid
+  userId         String  @db.Uuid
+  voiceSessionId String? @db.Uuid
+
+  kind       AudioKind @default(INPUT)
+  mimeType   String    @db.VarChar(80)
+  /// Extension-free opaque name on disk. Null once deleted.
+  storageKey String?   @db.VarChar(128)
+  byteSize   Int
+  durationMs Int?
+  sampleRate Int?
+  /// SHA-256 of the bytes, so a duplicate upload is recognisable and an
+  /// integrity problem is detectable without keeping the audio.
+  checksum   String    @db.VarChar(64)
+
+  retention   AudioRetention @default(DISCARD)
+  /// When the retention sweep may remove it. Null means "at end of use".
+  deleteAfter DateTime?
+  deletedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session VoiceSession? @relation(fields: [voiceSessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([deletedAt])
+  @@index([deleteAfter])
+  @@map("audio_assets")
+}
 
 model Note {
   id     String  @id @default(uuid()) @db.Uuid

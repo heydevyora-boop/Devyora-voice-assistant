@@ -45,8 +45,44 @@ export interface AiConfig {
   readonly geminiModel: string;
 }
 
+export interface SttConfig {
+  readonly provider: 'mock' | 'whisper' | 'google';
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly timeoutMs: number;
+  readonly maxAttempts: number;
+  readonly googleApiKey?: string;
+  readonly googleModel: string;
+}
+
+export interface TtsConfig {
+  readonly provider: 'mock' | 'openai' | 'google';
+  readonly timeoutMs: number;
+  readonly model: string;
+  readonly defaultVoice: string;
+  readonly googleApiKey?: string;
+}
+
+export interface AudioConfig {
+  readonly maxBytes: number;
+  readonly minBytes: number;
+  readonly maxDurationMs: number;
+  readonly tempDir: string;
+  readonly retentionDefault: 'DISCARD' | 'SESSION' | 'RETAIN';
+  readonly retentionDays: number;
+}
+
+export interface VoiceConfig {
+  readonly sessionTtlMs: number;
+  readonly sessionGraceMs: number;
+}
+
 export interface ProvidersConfig {
   readonly ai: AiConfig;
+  readonly stt: SttConfig;
+  readonly tts: TtsConfig;
+  readonly audio: AudioConfig;
+  readonly voice: VoiceConfig;
   readonly redisUrl?: string;
   readonly jwt: {
     readonly accessSecret?: string;
@@ -92,6 +128,34 @@ export function buildConfiguration(env: Env): Configuration {
         openAiModel: env.OPENAI_MODEL,
         geminiApiKey: env.GEMINI_API_KEY,
         geminiModel: env.GEMINI_MODEL,
+      },
+      stt: {
+        provider: env.STT_PROVIDER,
+        baseUrl: env.STT_BASE_URL,
+        model: env.STT_MODEL,
+        timeoutMs: env.STT_TIMEOUT_MS,
+        maxAttempts: env.STT_MAX_ATTEMPTS,
+        googleApiKey: env.GOOGLE_SPEECH_API_KEY,
+        googleModel: env.GOOGLE_SPEECH_MODEL,
+      },
+      tts: {
+        provider: env.TTS_PROVIDER,
+        timeoutMs: env.TTS_TIMEOUT_MS,
+        model: env.TTS_MODEL,
+        defaultVoice: env.TTS_DEFAULT_VOICE,
+        googleApiKey: env.GOOGLE_TTS_API_KEY,
+      },
+      audio: {
+        maxBytes: env.AUDIO_MAX_BYTES,
+        minBytes: env.AUDIO_MIN_BYTES,
+        maxDurationMs: env.AUDIO_MAX_DURATION_MS,
+        tempDir: env.AUDIO_TEMP_DIR,
+        retentionDefault: env.AUDIO_RETENTION_DEFAULT,
+        retentionDays: env.AUDIO_RETENTION_DAYS,
+      },
+      voice: {
+        sessionTtlMs: env.VOICE_SESSION_TTL_MS,
+        sessionGraceMs: env.VOICE_SESSION_GRACE_MS,
       },
       redisUrl: env.REDIS_URL,
       jwt: {

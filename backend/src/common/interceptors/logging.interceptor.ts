@@ -15,12 +15,17 @@ import { requestContext } from '../request-context';
  * Deliberately records method, route, status and duration only. Bodies and
  * query values can carry a transcript or a message, so they are never logged
  * here.
+ *
+ * HTTP only. A WebSocket frame has no method, route or status, and reaching
+ * for them on a socket context would fail the handler rather than log it.
  */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    if (context.getType() !== 'http') return next.handle();
+
     const http = context.switchToHttp();
     const request = http.getRequest<Request>();
     const startedAt = process.hrtime.bigint();

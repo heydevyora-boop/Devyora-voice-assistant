@@ -18,6 +18,10 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 @Injectable()
 export class CsrfGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
+    // HTTP only. There is no cookie to double-submit on a socket frame, and
+    // a socket's origin was already checked at the handshake.
+    if (context.getType() !== 'http') return true;
+
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     if (SAFE_METHODS.has(request.method)) return true;

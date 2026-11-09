@@ -26,12 +26,24 @@ interface Normalised {
  * Two rules it exists to enforce: every error leaves in the same shape, and
  * nothing a client sees reveals the database, the query or a stack trace —
  * in any environment, so a misconfigured deployment cannot start leaking.
+ *
+ * HTTP only. A socket has no response to write a status and body to, so a
+ * non-HTTP exception is logged and re-thrown for the WebSocket adapter to
+ * deal with rather than being half-handled here.
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
+    if (host.getType() !== 'http') {
+      this.logger.warn(
+        `Unhandled ${host.getType()} exception: ` +
+          (exception instanceof Error ? exception.message : 'unknown error'),
+      );
+      throw exception;
+    }
+
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();

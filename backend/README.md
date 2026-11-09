@@ -74,9 +74,11 @@ src/
 │                request context (correlation id)
 ├── database/    Prisma service, lifecycle, transactions, tenant scoping
 ├── modules/     feature modules — health, auth, users, devices,
-│                ai, conversations, assistant
-├── providers/   external adapters: LLM today; speech, OAuth  (Chunks 7, 8)
-├── gateways/    WebSocket                                     (Chunk 6)
+│                ai, conversations, assistant, voice
+├── providers/   external adapters: shared reliability + error vocabulary,
+│                llm/, stt/, tts/; OAuth                      (Chunk 8)
+├── gateways/    cross-module WebSocket fan-out                (Chunk 6)
+│                (the voice gateway lives with its module)
 ├── jobs/        BullMQ queues and processors                  (Chunk 6)
 ├── events/      in-process domain events                      (Chunk 6)
 └── security/    auth guard, ownership, rate limit, audit, crypto (Chunks 3, 8)
@@ -145,6 +147,25 @@ Approving an action says, in as many words, that nothing has run.
 with no credential is never selected: the deterministic stand-in is used
 instead, and readiness reports the interpreter as `degraded` so that is
 visible rather than silent.
+
+**Voice is text-first.** The contract is a transcript, not audio: a client
+that can recognise speech locally sends text and no audio ever leaves the
+device. Uploading a recording is a first-class path for platforms without a
+local recogniser, and on that path the recording is deleted as soon as it has
+been transcribed — retention beyond that is opt-in, per user. Wake-word
+detection runs on the device; this backend accepts an authenticated
+activation and refuses, by name, to take a continuous audio feed. See
+[docs/voice-pipeline.md](docs/voice-pipeline.md).
+
+**Nothing a stand-in produced is presented as real.** Whether a transcript
+came from a recogniser or from the deterministic test provider travels with
+it — into the event, the response and the stored row — and readiness reports
+the recogniser as `degraded` while no real one is configured.
+
+**The socket is judged like a request.** `PrincipalService` is the single
+implementation of "is this credential currently good", used by both the HTTP
+guard and the WebSocket handshake. An authorization check that exists twice
+is one that will eventually differ in one of them.
 
 ## Security notes for later chunks
 

@@ -61,6 +61,52 @@ export const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
 
+  // ── Speech recognition ──
+  // `whisper` points at any Whisper-compatible endpoint, hosted or
+  // self-hosted, so STT_BASE_URL is deployment, not code.
+  STT_PROVIDER: z.enum(['mock', 'whisper', 'google']).default('mock'),
+  STT_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  STT_MODEL: z.string().default('whisper-1'),
+  STT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
+  STT_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
+  /** Only used by the Google adapter; harmless when another is selected. */
+  GOOGLE_SPEECH_API_KEY: z.string().optional(),
+  GOOGLE_SPEECH_MODEL: z.string().default('latest_short'),
+
+  // ── Speech synthesis ──
+  TTS_PROVIDER: z.enum(['mock', 'openai', 'google']).default('mock'),
+  TTS_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(20_000),
+  TTS_MODEL: z.string().default('gpt-4o-mini-tts'),
+  TTS_DEFAULT_VOICE: z.string().default('alloy'),
+  GOOGLE_TTS_API_KEY: z.string().optional(),
+
+  // ── Audio handling ──
+  /**
+   * Upload ceiling. Roughly four minutes of Opus at 32 kbps, which is far
+   * more than a spoken command and still small enough that a hostile
+   * client cannot fill the disk with one request.
+   */
+  AUDIO_MAX_BYTES: z.coerce.number().int().min(1_024).max(50 * 1_024 * 1_024).default(10 * 1_024 * 1_024),
+  AUDIO_MAX_DURATION_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+  AUDIO_MIN_BYTES: z.coerce.number().int().min(16).default(512),
+  /**
+   * Where recordings live while they are being transcribed. Created with
+   * owner-only permissions; emptied on startup and after every request.
+   */
+  AUDIO_TEMP_DIR: z.string().default('/tmp/devyora-audio'),
+  /**
+   * Default retention. `DISCARD` deletes a recording the moment it has
+   * been transcribed; anything else is opt-in, per user.
+   */
+  AUDIO_RETENTION_DEFAULT: z.enum(['DISCARD', 'SESSION', 'RETAIN']).default('DISCARD'),
+  AUDIO_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+
+  // ── Voice sessions ──
+  VOICE_SESSION_TTL_MS: z.coerce.number().int().min(10_000).max(1_800_000).default(300_000),
+  /** How long a cancelled or finished session stays readable for a
+   *  reconnecting client before the sweep removes it. */
+  VOICE_SESSION_GRACE_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(900_000),
+
   // ── Reserved for later chunks; absent is valid today. ──
   JWT_ACCESS_SECRET: z.string().optional(),
   JWT_ACCESS_TTL: z.string().default('10m'),
