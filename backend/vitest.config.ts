@@ -22,6 +22,11 @@ export default defineConfig({
       // is what the configuration is for.
       AI_TIMEOUT_MS: '1500',
       AI_MAX_ATTEMPTS: '2',
+      // Short action deadlines, so the tests that exercise the timeout and
+      // the reconciliation sweep finish in seconds. The code path is the
+      // shipped one; only the deadlines differ.
+      ACTION_TIMEOUT_MS: '1200',
+      ACTION_STALE_CLAIM_MS: '2000',
     },
     include: ['test/**/*.spec.ts', 'src/**/*.spec.ts'],
     // Integration specs share one database; serial avoids cross-talk.

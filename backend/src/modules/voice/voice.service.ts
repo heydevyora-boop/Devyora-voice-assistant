@@ -380,6 +380,9 @@ export class VoiceService {
       turn = await this.assistant.handleTurn({
         userId: session.userId,
         deviceId: session.deviceId,
+        // Recorded on anything the turn proposes, so a spoken request can
+        // be traced back to the voice session it came from.
+        voiceSessionId: session.id,
         text: transcript,
         conversationId: session.conversationId ?? undefined,
         meta: context.meta,
@@ -752,6 +755,15 @@ export function stateForTurn(status: AssistantTurn['status']): State {
       // Understood and finished talking about. `unsupported` is a complete
       // outcome, not a failure: the assistant did its job and said no.
       return State.COMPLETED;
+    case 'executed':
+    case 'handed_off':
+    case 'unverified':
+      // The turn is over either way. Whether the action succeeded, was
+      // handed off or could not be confirmed is carried by the execution
+      // report, not by the session state — collapsing those three into one
+      // state here would be the place that detail got lost.
+      return State.COMPLETED;
+    case 'action_failed':
     case 'failed':
       return State.FAILED;
   }

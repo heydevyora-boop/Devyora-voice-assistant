@@ -293,7 +293,9 @@ describe('voice pipeline', () => {
         .expect(201);
 
       const turn = (res.body as Envelope<TurnView>).data;
-      expect(turn.session.state).toBe('QUEUED');
+      // The note was saved, so the session is finished rather than queued.
+      expect(turn.session.state).toBe('COMPLETED');
+      expect(turn.assistant!.status).toBe('executed');
       expect(turn.transcript!.text).toBe('note: buy milk');
       // No server-side recogniser ran, so there is nothing to report.
       expect(turn.transcript!.provider.id).toBe('device');
@@ -357,7 +359,7 @@ describe('voice pipeline', () => {
       expect(turn.transcript!.text).toBe('note: buy bread');
       // Carried through so nothing can present this as genuinely heard.
       expect(turn.transcript!.provider.isMock).toBe(true);
-      expect(turn.session.state).toBe('QUEUED');
+      expect(turn.session.state).toBe('COMPLETED');
 
       const asset = await prisma.audioAsset.findFirstOrThrow({
         where: { voiceSessionId: session.id, kind: 'INPUT' },
@@ -592,8 +594,12 @@ describe('voice pipeline', () => {
 
       const turn = (res.body as Envelope<TurnView>).data;
       // The text reply is the product; speech is an enhancement.
-      expect(turn.assistant!.reply).toBe('Saved it.');
-      expect(turn.session.state).toBe('QUEUED');
+      //
+      // And the wording is the executor's, not the model's: the model wrote
+      // "Saved it." before anything ran, so it cannot be allowed to
+      // describe an outcome it could not know.
+      expect(turn.assistant!.reply).toBe('Note saved.');
+      expect(turn.session.state).toBe('COMPLETED');
       expect(turn.speech).toBeNull();
       expect(turn.speechUnavailable).toBe('The reply could not be spoken.');
     });
@@ -746,7 +752,7 @@ describe('voice pipeline', () => {
           .set(auth(account.access))
           .send({ text: 'note: buy milk' })
           .expect(201);
-        expect((res.body as Envelope<TurnView>).data.assistant!.reply).toBe('Saved it.');
+        expect((res.body as Envelope<TurnView>).data.assistant!.reply).toBe('Note saved.');
       } finally {
         off();
       }
@@ -801,9 +807,19 @@ describe('voice pipeline', () => {
         .set(auth(account.access))
         .expect(200);
 
-      const body = (res.body as Envelope<{ session: SessionView; audioRemoved: number; note: string }>).data;
-      expect(body.session.state).toBe('CANCELLED');
-      expect(body.note).toContain('nothing was carried out');
+      const body = (res.body as Envelope<{
+        session: SessionView;
+        audioRemoved: number;
+        alreadyEnded: boolean;
+        note: string;
+      }>).data;
+      // The note was already saved, so the session had finished. Cancelling
+      // does not pretend to undo it — the state stays COMPLETED and
+      // `alreadyEnded` says so.
+      expect(body.session.state).toBe('COMPLETED');
+      expect(body.alreadyEnded).toBe(true);
+      // The recording still goes, which is the point of this test.
+      expect(body.audioRemoved).toBeGreaterThanOrEqual(1);
 
       // A user who cancels expects the recording gone, not retained
       // because a setting about completed turns said so.

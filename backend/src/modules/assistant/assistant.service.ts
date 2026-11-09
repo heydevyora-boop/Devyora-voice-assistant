@@ -6,12 +6,18 @@ import { AuditAction, AuditService } from '../../security/services/audit.service
 import { LlmError } from '../../providers/llm/errors';
 import { AiService } from '../ai/ai.service';
 import { CAPABILITIES, policyFor, type CapabilityPolicy } from '../ai/capability-registry';
+import { toActionParams } from '../ai/action-mapping';
+import { ActionRegistry } from '../actions/registry/action.registry';
+import { ActionExecutorService, type ExecutionReport } from '../actions/action-executor.service';
+import {
+  CLAIMABLE_STATES,
+  describeBlockedStatus,
+  isPendingTerminal,
+} from '../actions/pending-action.state';
+import type { AnyActionDefinition } from '../actions/registry/types';
 import type { Command, Intent } from '../ai/schemas/command.schema';
 import { ConversationsService } from '../conversations/conversations.service';
 import { AppConfigService } from '../../config/app-config.module';
-
-/** How long an unanswered confirmation stays open. */
-const CONFIRMATION_TTL_MS = 90_000;
 
 /**
  * What the assistant did with a turn.
@@ -25,12 +31,37 @@ export type TurnStatus =
   | 'awaiting_confirmation'
   /** The assistant needs an answer before it can build a plan. */
   | 'needs_clarification'
-  /** Understood and permitted, queued for the executor. */
+  /**
+   * Carried out, and the effect was read back. The only status that means
+   * something actually happened — a handler earns it by verifying its own
+   * result, not by returning without throwing.
+   */
+  | 'executed'
+  /**
+   * Prepared for the user to finish elsewhere: a message draft, an
+   * application to open. Deliberately not `executed`, because the task is
+   * not done and the person still has a step to take.
+   */
+  | 'handed_off'
+  /**
+   * It may have taken effect and we cannot confirm it. Reported as its own
+   * status rather than collapsed into success or failure, because guessing
+   * either way would be a lie in one direction or the other.
+   */
+  | 'unverified'
+  /** Attempted and did not take effect. */
+  | 'action_failed'
+  /**
+   * Approved and waiting for a worker. Reserved: every action in the
+   * registry today runs inline, and deferred execution arrives with the job
+   * queue.
+   */
   | 'queued_for_execution'
   /** Understood, but the assistant cannot carry it out. */
   | 'unsupported'
   /** Answered in conversation; nothing to carry out. */
   | 'answered'
+  /** Interpretation failed. Nothing was attempted. */
   | 'failed';
 
 export interface PlanField {
@@ -71,6 +102,11 @@ export interface AssistantTurn {
   readonly clarification: AssistantClarification | null;
   /** Present when the turn failed or is unsupported. */
   readonly problem: { readonly code: string; readonly detail: string } | null;
+  /**
+   * What the executor did, when an action ran without needing confirmation.
+   * Null while a plan is awaiting approval — nothing has been attempted.
+   */
+  readonly execution: ExecutionReport | null;
   readonly transcript: string;
   readonly detectedLanguage: string | null;
   readonly provider: { readonly id: string; readonly model: string; readonly isMock: boolean };
@@ -83,6 +119,10 @@ export interface TurnRequest {
   readonly conversationId?: string;
   /** Set when answering a clarification, so the turn resumes in context. */
   readonly answersCommandId?: string;
+  /** The authenticated session, recorded on anything it proposes. */
+  readonly sessionId?: string | null;
+  /** The voice session, when the request came by speech. */
+  readonly voiceSessionId?: string | null;
   readonly meta: { ipAddress?: string; userAgent?: string };
 }
 
@@ -108,6 +148,8 @@ export class AssistantService {
     private readonly conversations: ConversationsService,
     private readonly audit: AuditService,
     private readonly config: AppConfigService,
+    private readonly registry: ActionRegistry,
+    private readonly executor: ActionExecutorService,
   ) {}
 
   async handleTurn(request: TurnRequest): Promise<AssistantTurn> {
@@ -198,6 +240,7 @@ export class AssistantService {
         plan: null,
         clarification: { ...output.clarification, commandId: command.id },
         problem: null,
+        execution: null,
       };
     }
 
@@ -215,6 +258,7 @@ export class AssistantService {
           code: 'NO_MATCHING_INTENT',
           detail: 'The request does not map to anything the assistant can do.',
         },
+        execution: null,
       };
     }
 
@@ -233,6 +277,7 @@ export class AssistantService {
         plan: null,
         clarification: denial.clarify ? { ...denial.clarify, commandId: command.id } : null,
         problem: denial.clarify ? null : { code: denial.code, detail: denial.detail },
+        execution: null,
       };
     }
 
@@ -252,6 +297,7 @@ export class AssistantService {
         plan: null,
         clarification: null,
         problem: null,
+        execution: null,
       };
     }
 
@@ -271,12 +317,54 @@ export class AssistantService {
         plan: null,
         clarification: null,
         problem: { code: 'UNSUPPORTED_TARGET', detail },
+        execution: null,
       };
     }
 
-    const plan = await this.createPendingAction(request.userId, command.id, output.command, policy, kind);
+    // The registry entry, resolved from the capability table's action id.
+    // An intent that named something outside the registry would have failed
+    // at module load, so reaching here with no action is a bug, not input.
+    const action = policy.actionId ? this.registry.find(policy.actionId) : undefined;
+    if (!action) {
+      const detail = 'I understood that, but I cannot carry it out yet.';
+      await this.conversations.appendMessage(conversation.id, 'ASSISTANT', detail);
+      return {
+        ...base,
+        status: 'unsupported',
+        reply: detail,
+        intent: output.command.intent,
+        plan: null,
+        clarification: null,
+        problem: { code: 'ACTION_NOT_REGISTERED', detail },
+        execution: null,
+      };
+    }
 
-    await this.conversations.appendMessage(conversation.id, 'ASSISTANT', output.reply);
+    // Parameters are built by a named mapping, then held to the action's own
+    // input schema *before* a plan is shown. A proposal the executor would
+    // reject is not a proposal worth confirming.
+    const params = toActionParams(output.command, { timezone: user.timezone });
+    const validated = action.inputSchema.safeParse(params);
+    if (!validated.success) {
+      const detail = 'I could not work out the details for that.';
+      await this.conversations.appendMessage(conversation.id, 'ASSISTANT', detail);
+      return {
+        ...base,
+        status: 'unsupported',
+        reply: detail,
+        intent: output.command.intent,
+        plan: null,
+        clarification: null,
+        problem: { code: 'ACTION_PARAMS_INVALID', detail },
+        execution: null,
+      };
+    }
+
+    const plan = await this.createPendingAction(request, command.id, action, validated.data, kind);
+
+    if (plan.requiresConfirmation) {
+      await this.conversations.appendMessage(conversation.id, 'ASSISTANT', output.reply);
+    }
 
     await this.audit.record({
       action: AuditAction.ASSISTANT_ACTION_PROPOSED,
@@ -293,17 +381,84 @@ export class AssistantService {
       ...request.meta,
     });
 
+    // ── confirmation or execution ─────────────────────────────────────
+    if (plan.requiresConfirmation) {
+      // Nothing has been attempted. The plan waits for the user, and the
+      // executor will refuse it until they answer.
+      return {
+        ...base,
+        status: 'awaiting_confirmation',
+        reply: output.reply,
+        intent: output.command.intent,
+        plan,
+        clarification: null,
+        problem: null,
+        execution: null,
+      };
+    }
+
+    // Private, local, reversible work. Run it now and report what actually
+    // happened — the executor re-checks authorization, claims the action
+    // atomically and holds the handler's result to its schema.
+    const execution = await this.runNow(request, plan.pendingActionId);
+
+    const reply = execution.detail || output.reply;
+    await this.conversations.appendMessage(conversation.id, 'ASSISTANT', reply);
+
     return {
       ...base,
-      // Either waiting on the user or waiting on the executor. Never "done":
-      // nothing in this service has carried anything out.
-      status: policy.requiresConfirmation ? 'awaiting_confirmation' : 'queued_for_execution',
-      reply: output.reply,
+      status: statusForExecution(execution),
+      // The executor's own words. The model's suggested reply is a fallback
+      // only: it was written before anything ran and cannot know the
+      // outcome, so it must not be allowed to describe one.
+      reply,
       intent: output.command.intent,
       plan,
       clarification: null,
-      problem: null,
+      problem:
+        execution.status === 'FAILED'
+          ? { code: execution.failureCode?.toUpperCase() ?? 'ACTION_FAILED', detail: execution.detail }
+          : null,
+      execution,
     };
+  }
+
+  /**
+   * Runs an action that needs no confirmation.
+   *
+   * Errors are caught and turned into a failed report rather than thrown: a
+   * turn that got as far as proposing an action should tell the user what
+   * happened to it, not disappear into a 500.
+   */
+  private async runNow(request: TurnRequest, pendingActionId: string): Promise<ExecutionReport> {
+    try {
+      return await this.executor.execute({
+        userId: request.userId,
+        deviceId: request.deviceId,
+        sessionId: request.sessionId ?? null,
+        pendingActionId,
+        meta: request.meta,
+      });
+    } catch (error) {
+      const detail =
+        error instanceof AppError ? error.message : 'That could not be carried out.';
+      this.logger.warn(`Inline execution of ${pendingActionId} failed: ${detail}`);
+
+      return {
+        executionId: '',
+        pendingActionId,
+        actionId: '',
+        status: 'FAILED',
+        detail,
+        verified: false,
+        failureCode: 'execution_refused',
+        resultRef: null,
+        result: null,
+        duplicate: false,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      };
+    }
   }
 
   // ───────────────────────────────────────────────── permission evaluation
@@ -409,37 +564,57 @@ export class AssistantService {
 
   // ──────────────────────────────────────────────────────── action routing
 
+  /**
+   * Writes the proposal.
+   *
+   * The preview is rendered by the action's own `preview()` from the same
+   * validated parameters that will be passed to its handler. That is the
+   * guarantee the confirmation system rests on: what the user approves and
+   * what runs cannot drift apart, because they are the same object.
+   */
   private async createPendingAction(
-    userId: string,
+    request: TurnRequest,
     commandId: string,
-    command: Command,
-    policy: CapabilityPolicy,
+    action: AnyActionDefinition,
+    params: unknown,
     kind: ActionKind,
   ): Promise<AssistantPlan> {
-    const fields = describeFields(command);
-    const expiresAt = new Date(Date.now() + CONFIRMATION_TTL_MS);
+    const fields = action.preview(params as never);
+    const requiresConfirmation = action.confirmationPolicy === 'always';
+    const expiresAt = new Date(Date.now() + this.config.providers.actions.confirmationTtlMs);
 
     const pending = await this.prisma.pendingAction.create({
       data: {
-        userId,
+        userId: request.userId,
+        // Not optional. A confirmation belongs to the device that raised it,
+        // and the executor refuses another device even on the same account.
+        deviceId: request.deviceId,
+        sessionId: request.sessionId ?? null,
+        voiceSessionId: request.voiceSessionId ?? null,
         commandId,
+        actionId: action.id,
         kind,
-        executionMode: policy.executionMode,
-        plan: { intent: command.intent, entities: command.entities, fields } as object,
-        // Server policy, not the model's opinion and not the client's.
-        requiresConfirmation: policy.requiresConfirmation,
+        executionMode: action.executionMode,
+        plan: { intent: action.id, fields } as object,
+        params: params as object,
+        // Server policy, read from the registry. Not the model's opinion and
+        // not the client's.
+        requiresConfirmation,
         status: PendingActionStatus.PENDING,
         expiresAt,
       },
-      select: { id: true },
+      select: { id: true, plan: true },
     });
 
     return {
       pendingActionId: pending.id,
       kind,
-      intent: command.intent,
-      executionMode: policy.executionMode,
-      requiresConfirmation: policy.requiresConfirmation,
+      intent: (await this.prisma.assistantCommand.findUniqueOrThrow({
+        where: { id: commandId },
+        select: { intent: true },
+      })).intent as Intent,
+      executionMode: action.executionMode,
+      requiresConfirmation,
       fields,
       expiresAt: expiresAt.toISOString(),
     };
@@ -490,6 +665,7 @@ export class AssistantService {
       plan: null,
       clarification: null,
       problem: { code: code.toUpperCase(), detail },
+      execution: null,
       transcript,
       detectedLanguage: null,
       provider: { id: 'none', model: 'none', isMock: false },
@@ -534,21 +710,53 @@ export class AssistantService {
    * and the response says so. Chunk 6 attaches the worker that acts on
    * `APPROVED` rows.
    */
+  /**
+   * Records the user's decision, and on approval carries the action out.
+   *
+   * The sequence the confirmation contract specifies, in order:
+   *
+   * 1. the caller is authenticated (the global guard, before this runs);
+   * 2. ownership is validated — user **and** device;
+   * 3. expiry is checked;
+   * 4. an already-settled attempt short-circuits rather than repeating;
+   * 5. authorization is re-checked, inside the executor, at execution time;
+   * 6. the action runs;
+   * 7. the result is stored and returned.
+   *
+   * Steps 4–7 are the executor's, not duplicated here. Rejection is
+   * terminal: `REJECTED` has no outgoing edge in the state table, so
+   * nothing — a retry, a reconnect, a sweep — can carry it out later.
+   */
   async decide(
     userId: string,
     pendingActionId: string,
     approve: boolean,
-    meta: { ipAddress?: string; userAgent?: string },
+    meta: { ipAddress?: string; userAgent?: string; deviceId?: string },
   ) {
     const pending = await this.prisma.pendingAction.findFirst({
-      where: { id: pendingActionId, userId },
-      select: { id: true, status: true, expiresAt: true, kind: true, executionMode: true },
+      where: {
+        id: pendingActionId,
+        userId,
+        // One device may not decide another device's action, even on the
+        // same account. Omitting the device would make the confirmation
+        // belong to the account rather than to the screen it appeared on.
+        ...(meta.deviceId ? { deviceId: meta.deviceId } : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        kind: true,
+        actionId: true,
+        deviceId: true,
+        sessionId: true,
+      },
     });
-    // Another user's id reads as missing, like everywhere else.
+    // Another user's — or another device's — id reads as missing.
     if (!pending) throw AppError.notFound('Action');
 
     if (pending.status !== PendingActionStatus.PENDING) {
-      throw AppError.conflict('That action has already been decided.');
+      throw AppError.conflict(describeBlockedStatus(pending.status));
     }
     if (pending.expiresAt <= new Date()) {
       await this.prisma.pendingAction.update({
@@ -558,29 +766,144 @@ export class AssistantService {
       throw AppError.conflict('That request expired. Nothing was carried out.');
     }
 
-    const status = approve ? PendingActionStatus.APPROVED : PendingActionStatus.REJECTED;
+    if (!approve) {
+      await this.prisma.pendingAction.update({
+        where: { id: pending.id },
+        data: { status: PendingActionStatus.REJECTED, decidedAt: new Date() },
+      });
+      await this.audit.record({
+        action: AuditAction.ASSISTANT_ACTION_REJECTED,
+        userId,
+        deviceId: pending.deviceId,
+        resource: 'pending_action',
+        resourceId: pending.id,
+        metadata: { kind: pending.kind, actionId: pending.actionId },
+        ...meta,
+      });
+
+      return {
+        pendingActionId: pending.id,
+        status: 'rejected' as const,
+        execution: null,
+        note: 'Rejected. Nothing was carried out, and it cannot be carried out later.',
+      };
+    }
+
+    // The approval is recorded before the attempt, so a crash between the
+    // two leaves a record that the user said yes — rather than losing their
+    // decision and asking again.
     await this.prisma.pendingAction.update({
       where: { id: pending.id },
-      data: { status, decidedAt: new Date() },
+      data: { status: PendingActionStatus.APPROVED, decidedAt: new Date() },
+    });
+    await this.audit.record({
+      action: AuditAction.ASSISTANT_ACTION_APPROVED,
+      userId,
+      deviceId: pending.deviceId,
+      resource: 'pending_action',
+      resourceId: pending.id,
+      metadata: { kind: pending.kind, actionId: pending.actionId },
+      ...meta,
+    });
+
+    const execution = await this.executor.execute({
+      userId,
+      deviceId: pending.deviceId,
+      sessionId: pending.sessionId,
+      pendingActionId: pending.id,
+      meta,
+    });
+
+    return {
+      pendingActionId: pending.id,
+      status: statusForExecution(execution),
+      execution,
+      // The executor's own words, which describe what happened rather than
+      // what was intended.
+      note: execution.detail,
+    };
+  }
+
+  /**
+   * Cancels a proposal without running it.
+   *
+   * Separate from rejecting: rejection is the user answering the question,
+   * cancellation is the user withdrawing it. Both are terminal and both
+   * permanently bar execution, but a reader of the audit log should be able
+   * to tell them apart.
+   */
+  async cancel(
+    userId: string,
+    pendingActionId: string,
+    meta: { ipAddress?: string; userAgent?: string; deviceId?: string },
+  ) {
+    const pending = await this.prisma.pendingAction.findFirst({
+      where: {
+        id: pendingActionId,
+        userId,
+        ...(meta.deviceId ? { deviceId: meta.deviceId } : {}),
+      },
+      select: { id: true, status: true, kind: true, actionId: true, deviceId: true },
+    });
+    if (!pending) throw AppError.notFound('Action');
+
+    if (isPendingTerminal(pending.status)) {
+      // Idempotent: cancelling something already finished is a no-op that
+      // says so, not a conflict.
+      return {
+        pendingActionId: pending.id,
+        status: 'cancelled' as const,
+        alreadyEnded: true,
+        note: describeBlockedStatus(pending.status),
+      };
+    }
+
+    await this.prisma.pendingAction.updateMany({
+      where: { id: pending.id, status: { in: [...CLAIMABLE_STATES] } },
+      data: { status: PendingActionStatus.CANCELLED, decidedAt: new Date() },
     });
 
     await this.audit.record({
-      action: approve ? AuditAction.ASSISTANT_ACTION_APPROVED : AuditAction.ASSISTANT_ACTION_REJECTED,
+      action: AuditAction.ACTION_CANCELLED,
       userId,
+      deviceId: pending.deviceId,
       resource: 'pending_action',
       resourceId: pending.id,
-      metadata: { kind: pending.kind },
+      metadata: { kind: pending.kind, actionId: pending.actionId },
       ...meta,
     });
 
     return {
       pendingActionId: pending.id,
-      status: approve ? ('queued_for_execution' as const) : ('rejected' as const),
-      // Said plainly rather than implied: approval is not completion.
-      note: approve
-        ? 'Approved and queued. Nothing has run yet — execution is not connected in this build.'
-        : 'Rejected. Nothing was carried out.',
+      status: 'cancelled' as const,
+      alreadyEnded: false,
+      note: 'Cancelled. It will not be carried out.',
     };
+  }
+
+}
+
+/**
+ * An execution report, as a turn status.
+ *
+ * Exhaustive over `ExecutionStatus`, so a status added to the database enum
+ * will not compile until it has been given a meaning here. There is no
+ * default branch for the same reason.
+ */
+export function statusForExecution(report: ExecutionReport): TurnStatus {
+  switch (report.status) {
+    case 'COMPLETED':
+      return 'executed';
+    case 'HANDOFF':
+      return 'handed_off';
+    case 'PARTIAL':
+    case 'UNVERIFIED':
+      return 'unverified';
+    case 'FAILED':
+      return 'action_failed';
+    case 'RUNNING':
+      // Still in flight. Only reachable if a report is read mid-attempt.
+      return 'queued_for_execution';
   }
 }
 
@@ -637,36 +960,3 @@ function unsupportedTargetMessage(command: Command): string {
   return 'I understood that, but I cannot carry it out yet.';
 }
 
-/**
- * Turns entities into the labelled fields a confirmation card shows.
- *
- * The user has to be able to see exactly what will happen before approving,
- * so this is explicit per intent rather than a generic dump of the object.
- */
-function describeFields(command: Command): PlanField[] {
-  switch (command.intent) {
-    case 'save_note':
-      return [{ key: 'text', label: 'Note', value: command.entities.text, editable: true, multiline: true }];
-    case 'create_reminder':
-      return [
-        { key: 'text', label: 'Remind me to', value: command.entities.text, editable: true },
-        { key: 'dueAt', label: 'When', value: command.entities.dueAt ?? '', editable: true },
-      ];
-    case 'send_message':
-    case 'prepare_message':
-      return [
-        { key: 'platform', label: 'App', value: command.entities.platform, editable: false },
-        { key: 'recipient', label: 'To', value: command.entities.recipient ?? '', editable: true },
-        { key: 'message', label: 'Message', value: command.entities.message, editable: true, multiline: true },
-      ];
-    case 'open_application':
-      return [{ key: 'application', label: 'Application', value: command.entities.application, editable: false }];
-    case 'get_calendar_events':
-      return [
-        { key: 'from', label: 'From', value: command.entities.from ?? '', editable: false },
-        { key: 'to', label: 'To', value: command.entities.to ?? '', editable: false },
-      ];
-    default:
-      return [];
-  }
-}

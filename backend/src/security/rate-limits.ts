@@ -43,6 +43,11 @@ export const RateLimit = {
   /// An upload costs a transcription as well, and moves real bytes, so it
   /// is the tightest ceiling here.
   voiceAudioUpload: { ttl: 60_000, limit: scale(20) },
+
+  /// Executing has a real effect, so the ceiling is tight. It is not the
+  /// duplicate guard — that is the idempotency key — but it bounds how fast
+  /// a compromised client could work through a list of proposals.
+  actionExecute: { ttl: 60_000, limit: scale(30) },
 } as const;
 
 /** A deliberately tiny limit the rate-limit test can target. */

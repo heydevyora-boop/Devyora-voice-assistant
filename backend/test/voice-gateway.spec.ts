@@ -289,7 +289,9 @@ describe('voice gateway', () => {
       }>(socket, 'voice.resume', { sessionId, afterSeq: 0 });
 
       expect(replay.ok).toBe(true);
-      expect(replay.session!.state).toBe('QUEUED');
+      // The note was saved while the client was away, so the session the
+      // client rejoins is already finished.
+      expect(replay.session!.state).toBe('COMPLETED');
       const types = replay.events!.map((e) => e.type);
       expect(types).toContain('transcript.final');
       expect(types).toContain('response.ready');

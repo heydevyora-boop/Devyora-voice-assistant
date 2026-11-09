@@ -33,6 +33,14 @@ export const AuditAction = {
   ASSISTANT_ACTION_PROPOSED: 'assistant.action.proposed',
   ASSISTANT_ACTION_APPROVED: 'assistant.action.approved',
   ASSISTANT_ACTION_REJECTED: 'assistant.action.rejected',
+  // Execution is recorded separately from approval, and a refusal
+  // separately from a failure, so a reader of this table can tell which of
+  // the three happened without inferring it.
+  ACTION_DENIED: 'action.denied',
+  ACTION_EXECUTED: 'action.executed',
+  ACTION_FAILED: 'action.failed',
+  ACTION_CANCELLED: 'action.cancelled',
+  ASSISTANT_PREFERENCES_CHANGED: 'assistant.preferences.changed',
 } as const;
 
 export type AuditActionValue = (typeof AuditAction)[keyof typeof AuditAction];

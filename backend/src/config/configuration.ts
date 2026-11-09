@@ -72,6 +72,12 @@ export interface AudioConfig {
   readonly retentionDays: number;
 }
 
+export interface ActionsConfig {
+  readonly timeoutMs: number;
+  readonly staleClaimMs: number;
+  readonly confirmationTtlMs: number;
+}
+
 export interface VoiceConfig {
   readonly sessionTtlMs: number;
   readonly sessionGraceMs: number;
@@ -83,6 +89,7 @@ export interface ProvidersConfig {
   readonly tts: TtsConfig;
   readonly audio: AudioConfig;
   readonly voice: VoiceConfig;
+  readonly actions: ActionsConfig;
   readonly redisUrl?: string;
   readonly jwt: {
     readonly accessSecret?: string;
@@ -156,6 +163,11 @@ export function buildConfiguration(env: Env): Configuration {
       voice: {
         sessionTtlMs: env.VOICE_SESSION_TTL_MS,
         sessionGraceMs: env.VOICE_SESSION_GRACE_MS,
+      },
+      actions: {
+        timeoutMs: env.ACTION_TIMEOUT_MS,
+        staleClaimMs: env.ACTION_STALE_CLAIM_MS,
+        confirmationTtlMs: env.ACTION_CONFIRMATION_TTL_MS,
       },
       redisUrl: env.REDIS_URL,
       jwt: {

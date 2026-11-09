@@ -60,7 +60,12 @@ describe('assistant orchestration', () => {
       .send({ email: uniqueEmail('asst'), password: STRONG_PASSWORD, device: NATIVE_DEVICE })
       .expect(201);
     const body = res.body as AuthBody;
-    return { userId: body.data.user.id, access: body.data.tokens.accessToken! };
+    return {
+      email: body.data.user.email,
+      userId: body.data.user.id,
+      deviceId: body.data.device.id,
+      access: body.data.tokens.accessToken!,
+    };
   }
 
   const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -84,19 +89,34 @@ describe('assistant orchestration', () => {
       const result = await turn(account.access, 'remind me to buy milk on the way home');
 
       expect(result.intent).toBe('save_note');
-      expect(result.status).toBe('queued_for_execution');
+      // Private, local, reversible work needs no confirmation, so it runs.
+      expect(result.status).toBe('executed');
       expect(result.plan).not.toBeNull();
       expect(result.plan!.kind).toBe('NOTE_SAVE');
       expect(result.plan!.requiresConfirmation).toBe(false);
+      // The preview is the action's own, rendered from the parameters that
+      // were passed to its handler.
       expect(result.plan!.fields).toEqual([
         { key: 'text', label: 'Note', value: 'buy milk on the way home', editable: true, multiline: true },
       ]);
 
+      // Verified means the effect was read back, not that nothing threw.
+      expect(result.execution).not.toBeNull();
+      expect(result.execution!.status).toBe('COMPLETED');
+      expect(result.execution!.verified).toBe(true);
+
+      const saved = await prisma.note.findFirstOrThrow({
+        where: { id: result.execution!.resultRef!, userId: account.userId },
+      });
+      expect(saved.text).toBe('buy milk on the way home');
+
       const row = await prisma.pendingAction.findUniqueOrThrow({
         where: { id: result.plan!.pendingActionId },
       });
-      expect(row.status).toBe('PENDING');
+      expect(row.status).toBe('EXECUTED');
       expect(row.userId).toBe(account.userId);
+      expect(row.deviceId).toBe(account.deviceId);
+      expect(row.actionId).toBe('notes.create');
     });
 
     it('records the command with the provider that produced it', async () => {
@@ -352,18 +372,51 @@ describe('assistant orchestration', () => {
   // ───────────────────────────────────────── never claims success
 
   describe('execution honesty', () => {
-    it('has no status that means the action ran', async () => {
+    it('only reports "executed" when the effect was actually read back', async () => {
+      // Execution is connected now, so `executed` is a legitimate status —
+      // but only on the terms the engine sets. It appears when, and only
+      // when, the handler verified its own result.
       const account = await newAccount();
       mock.script(/milk/i, note());
       const result = await turn(account.access, 'note: buy milk');
-      expect(['queued_for_execution', 'awaiting_confirmation', 'answered']).toContain(result.status);
-      expect(result.status).not.toBe('executed');
+
+      expect(result.status).toBe('executed');
+      expect(result.execution!.verified).toBe(true);
+      expect(result.execution!.status).toBe('COMPLETED');
+
+      // And the thing it claims to have created exists.
+      await expect(
+        prisma.note.findFirstOrThrow({ where: { id: result.execution!.resultRef! } }),
+      ).resolves.toBeTruthy();
     });
 
-    it('queues on approval and says plainly that nothing has run', async () => {
+    it('never reports a hand-off as executed', async () => {
+      const account = await newAccount();
+      mock.script(/spotify/i, {
+        command: { intent: 'open_application', entities: { application: 'spotify' } },
+        confidence: 0.9,
+        clarification: null,
+        reply: 'Opening Spotify.',
+        detectedLanguage: 'en-IN',
+      });
+
+      const result = await turn(account.access, 'open spotify');
+
+      // The server cannot open an application on a device. It produced a
+      // descriptor; whether anything opened is unknowable here.
+      expect(result.status).toBe('handed_off');
+      expect(result.execution!.status).toBe('HANDOFF');
+      expect(result.execution!.verified).toBe(false);
+    });
+
+    it('carries the action out on approval, without claiming to have sent it', async () => {
       const account = await newAccount();
       mock.script(/late/i, message('+919876543210'));
       const planned = await turn(account.access, 'tell +919876543210 I am late');
+
+      // Nothing was attempted while it waited.
+      expect(planned.execution).toBeNull();
+      expect(await prisma.actionExecution.count({ where: { pendingActionId: planned.plan!.pendingActionId } })).toBe(0);
 
       const res = await request(http())
         .post(`/api/v1/assistant/actions/${planned.plan!.pendingActionId}/decision`)
@@ -371,16 +424,31 @@ describe('assistant orchestration', () => {
         .send({ approve: true })
         .expect(201);
 
-      const body = (res.body as Envelope<{ status: string; note: string }>).data;
-      expect(body.status).toBe('queued_for_execution');
-      expect(body.note).toContain('Nothing has run yet');
+      const body = (res.body as Envelope<{
+        status: string;
+        note: string;
+        execution: { status: string; verified: boolean; result: { sentByServer: boolean; composeUrl: string } };
+      }>).data;
+
+      // A draft was prepared. Nothing was sent, and the status says so.
+      expect(body.status).toBe('handed_off');
+      expect(body.execution.status).toBe('HANDOFF');
+      expect(body.execution.verified).toBe(false);
+      expect(body.execution.result.sentByServer).toBe(false);
+      expect(body.execution.result.composeUrl).toContain('919876543210');
 
       const row = await prisma.pendingAction.findUniqueOrThrow({
         where: { id: planned.plan!.pendingActionId },
       });
-      expect(row.status).toBe('APPROVED');
-      // Approval is a decision, not an outcome: no execution row exists.
-      expect(await prisma.actionExecution.count({ where: { pendingActionId: row.id } })).toBe(0);
+      expect(row.status).toBe('EXECUTED');
+
+      const executions = await prisma.actionExecution.findMany({
+        where: { pendingActionId: row.id },
+      });
+      expect(executions).toHaveLength(1);
+      expect(executions[0].status).toBe('HANDOFF');
+      // The record references the parameters without keeping a copy of them.
+      expect(executions[0].paramsDigest).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it('records a rejection and carries nothing out', async () => {

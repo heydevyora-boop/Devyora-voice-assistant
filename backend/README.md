@@ -74,7 +74,7 @@ src/
 │                request context (correlation id)
 ├── database/    Prisma service, lifecycle, transactions, tenant scoping
 ├── modules/     feature modules — health, auth, users, devices,
-│                ai, conversations, assistant, voice
+│                ai, conversations, assistant, voice, actions
 ├── providers/   external adapters: shared reliability + error vocabulary,
 │                llm/, stt/, tts/; OAuth                      (Chunk 8)
 ├── gateways/    cross-module WebSocket fan-out                (Chunk 6)
@@ -161,6 +161,24 @@ activation and refuses, by name, to take a continuous audio feed. See
 came from a recogniser or from the deterministic test provider travels with
 it — into the event, the response and the stored row — and readiness reports
 the recogniser as `degraded` while no real one is configured.
+
+**Only allow-listed actions run.** Every effect this backend can produce is
+one of six entries in a frozen registry, each with a direct handler
+reference. A model proposes an intent; the intent names an id in that table;
+the id maps to a function written here. No handler evaluates code, runs a
+command, touches the filesystem or makes a network call — asserted by reading
+the sources, not by review. See
+[docs/action-engine.md](docs/action-engine.md).
+
+**A user's "no" is permanent by construction.** `REJECTED`, `EXPIRED` and
+`CANCELLED` have no outgoing edge in the state table, so there is no route by
+which a retry, a reconnect or a sweep carries out something that was refused.
+
+**Success is earned, not assumed.** `COMPLETED` requires a handler to have
+read its own effect back. A hand-off reports `HANDOFF`, a timeout reports
+`UNVERIFIED`, and neither is ever presented as success — because for a
+message or an application launch, whether it worked is genuinely unknowable
+from here.
 
 **The socket is judged like a request.** `PrincipalService` is the single
 implementation of "is this credential currently good", used by both the HTTP

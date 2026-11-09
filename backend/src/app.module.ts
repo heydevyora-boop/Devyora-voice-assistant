@@ -18,6 +18,7 @@ import { LlmModule } from './providers/llm/llm.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { AssistantModule } from './modules/assistant/assistant.module';
+import { ActionsModule } from './modules/actions/actions.module';
 import { SttModule } from './providers/stt/stt.module';
 import { TtsModule } from './providers/tts/tts.module';
 import { VoiceModule } from './modules/voice/voice.module';
@@ -51,6 +52,7 @@ import { VoiceModule } from './modules/voice/voice.module';
     // The assistant. LlmModule is listed even though it is @Global, so the
     // provider wiring is visible here rather than only by side effect.
     LlmModule,
+    ActionsModule,
     AiModule,
     ConversationsModule,
     AssistantModule,

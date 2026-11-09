@@ -34,12 +34,14 @@ export class AssistantController {
   turn(
     @CurrentUser('userId') userId: string,
     @CurrentUser('deviceId') deviceId: string,
+    @CurrentUser('sessionId') sessionId: string,
     @Body() dto: AssistantTurnDto,
     @Req() req: Request,
   ) {
     return this.assistant.handleTurn({
       userId,
       deviceId,
+      sessionId,
       text: dto.text,
       conversationId: dto.conversationId,
       answersCommandId: dto.answersCommandId,
@@ -50,20 +52,47 @@ export class AssistantController {
   /**
    * Approve or reject a proposed action.
    *
-   * Approval records the decision and queues the action. It does not run it,
-   * and the response says so in as many words, because an executor does not
-   * exist in this build.
+   * Approval carries the action out and the response describes what
+   * actually happened, in the executor's own words. Rejection is permanent:
+   * the action cannot be run later by a retry or a reconnect.
    */
   @Post('actions/:id/decision')
   @Throttle({ default: RateLimit.assistantDecision })
-  @ApiOperation({ summary: 'Decide on a pending action.' })
+  @ApiOperation({ summary: 'Decide on a pending action, and carry it out if approved.' })
   decide(
     @CurrentUser('userId') userId: string,
+    @CurrentUser('deviceId') deviceId: string,
     @Param('id', new ParseUuidPipe('id')) id: string,
     @Body() dto: DecideActionDto,
     @Req() req: Request,
   ) {
     return this.assistant.decide(userId, id, dto.approve, {
+      // The device is part of ownership: a confirmation belongs to the
+      // screen it appeared on, not to the account at large.
+      deviceId,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  /**
+   * Withdraw a proposal without answering it.
+   *
+   * Distinct from rejecting, and recorded distinctly: rejection is the user
+   * saying no, cancellation is the user taking the question back. Both bar
+   * execution permanently.
+   */
+  @Post('actions/:id/cancel')
+  @Throttle({ default: RateLimit.assistantDecision })
+  @ApiOperation({ summary: 'Cancel a pending action.' })
+  cancel(
+    @CurrentUser('userId') userId: string,
+    @CurrentUser('deviceId') deviceId: string,
+    @Param('id', new ParseUuidPipe('id')) id: string,
+    @Req() req: Request,
+  ) {
+    return this.assistant.cancel(userId, id, {
+      deviceId,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });

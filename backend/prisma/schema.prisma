@@ -79,20 +79,45 @@ enum ExecutionMode {
   ACCOUNT
 }
 
+/// A proposed action's lifecycle. Transitions are validated against an
+/// explicit table in `actions/pending-action.state.ts`; nothing moves a row
+/// by writing this column directly.
+///
+/// REJECTED, EXPIRED and CANCELLED are terminal and permanently prevent
+/// execution. That is the point of them: a user who said no, or who waited
+/// too long, must not have the action run later by a retry or a reconnect.
 enum PendingActionStatus {
   PENDING
   APPROVED
+  EXECUTING
+  EXECUTED
+  FAILED
   REJECTED
   EXPIRED
   CANCELLED
 }
 
-/// Mirrors the frontend's three-way ActionOutcome. HANDOFF is deliberately
-/// distinct from COMPLETED: something verifiable happened, but the task is
-/// not finished and must never be reported as success.
+/// What actually happened when a handler ran.
+///
+/// HANDOFF is deliberately distinct from COMPLETED: something verifiable
+/// happened, but the task is not finished and must never be reported as
+/// success. UNVERIFIED is the honest answer when a call may have taken
+/// effect and the provider gave us no way to confirm it — see
+/// `docs/action-engine.md` on exactly-once.
 enum ExecutionStatus {
+  /// Claimed and in flight. Written before the handler runs, so a
+  /// concurrent duplicate collides on the idempotency key instead of
+  /// executing twice.
+  RUNNING
+  /// Succeeded, and the result was read back.
   COMPLETED
+  /// Prepared for the user to finish elsewhere. Not success.
   HANDOFF
+  /// Some of the work took effect and some did not.
+  PARTIAL
+  /// May have taken effect; we cannot tell. Never reported as success.
+  UNVERIFIED
+  /// Did not take effect.
   FAILED
 }
 
@@ -229,6 +254,7 @@ model User {
   pendingActions     PendingAction[]
   voiceSessions      VoiceSession[]
   audioAssets        AudioAsset[]
+  actionExecutions   ActionExecution[]
   notes              Note[]
   reminders          Reminder[]
   connectedAccounts  ConnectedAccount[]
@@ -270,10 +296,11 @@ model Device {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sessions      Session[]
-  notifications Notification[]
-  voiceSessions VoiceSession[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions       Session[]
+  notifications  Notification[]
+  voiceSessions  VoiceSession[]
+  pendingActions PendingAction[]
 
   @@index([userId, revokedAt])
   @@index([lastSeenAt])
@@ -429,11 +456,30 @@ model PendingAction {
   userId    String @db.Uuid
   commandId String @unique @db.Uuid
 
+  /// The registry entry this will run, e.g. `notes.create`. An action not in
+  /// the registry cannot be named here, which is what stops a model's output
+  /// becoming a call to something arbitrary.
+  actionId String @db.VarChar(80)
+
+  /// The device that asked. Not optional: a confirmation belongs to the
+  /// device that raised it, and another device cannot execute it.
+  deviceId       String  @db.Uuid
+  /// The authenticated session, so a revoked session's pending work is
+  /// traceable.
+  sessionId      String? @db.Uuid
+  /// The voice session, when the request came by speech.
+  voiceSessionId String? @db.Uuid
+
   kind          ActionKind
   executionMode ExecutionMode
   /// The resolved plan: title, target and the editable fields the user sees.
   /// Structured but open-ended per kind, so it is stored as a document.
   plan          Json
+
+  /// Parameters validated against the action's input schema. These are the
+  /// values that will actually be used — the preview the user confirms is
+  /// rendered from them, so they cannot drift from what runs.
+  params Json
 
   requiresConfirmation Boolean             @default(true)
   status               PendingActionStatus @default(PENDING)
@@ -443,27 +489,67 @@ model PendingAction {
   idempotencyKey String?   @unique @db.VarChar(100)
   expiresAt      DateTime
   decidedAt      DateTime?
+  /// When the handler was claimed. Set in the same transaction that moves
+  /// the row to EXECUTING, so a second claim sees it.
+  startedAt      DateTime?
+  finishedAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     Device            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   command    AssistantCommand  @relation(fields: [commandId], references: [id], onDelete: Cascade)
   executions ActionExecution[]
 
   @@index([userId, status])
+  @@index([deviceId, status])
   @@index([expiresAt])
   @@map("pending_actions")
 }
 
+/// The record of one attempt to carry out an action.
+///
+/// Written **before** the handler runs, with status RUNNING and a unique
+/// idempotency key. That ordering is the duplicate guard: a concurrent or
+/// replayed request collides on the key and is handed the existing record
+/// instead of executing a second time.
+///
+/// Parameters are not stored here. `paramsDigest` identifies them without
+/// keeping a second copy of a message the user wrote — the pending action
+/// already holds the values, and once it is purged the message is gone
+/// rather than living on in an execution log.
 model ActionExecution {
   id              String @id @default(uuid()) @db.Uuid
   pendingActionId String @db.Uuid
   attempt         Int    @default(1)
 
+  /// Denormalised from the pending action so an execution can be audited
+  /// and scoped without a join, and still reads correctly if the pending
+  /// action is later purged.
+  userId    String  @db.Uuid
+  deviceId  String? @db.Uuid
+  sessionId String? @db.Uuid
+  actionId  String  @db.VarChar(80)
+
+  /// Unique across the table. This, not application logic, is what makes a
+  /// duplicate impossible: the second insert fails.
+  idempotencyKey String @unique @db.VarChar(200)
+  /// SHA-256 of the validated parameters. A privacy-safe reference: enough
+  /// to tell two attempts apart, not enough to reconstruct the content.
+  paramsDigest   String @db.VarChar(64)
+
   status       ExecutionStatus
   /// Plain-language result shown to the user, in the executor's own words.
   detail       String
+  /// True only when the effect was read back after the fact. False means
+  /// the result is reported as unverified, never as success.
+  verified     Boolean         @default(false)
+  /// Normalised failure code, e.g. `provider_unavailable`. Never a provider
+  /// message: those go to the log.
+  failureCode  String?         @db.VarChar(40)
+  /// The row this action created, where it created one.
+  resultRef    String?         @db.VarChar(200)
   /// Identifier returned by an external provider, where one exists.
   providerRef  String?         @db.VarChar(200)
   /// Structured provider response for debugging; shape differs per provider.
@@ -473,9 +559,12 @@ model ActionExecution {
   finishedAt DateTime?
 
   pendingAction PendingAction @relation(fields: [pendingActionId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([pendingActionId, attempt])
   @@index([status])
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([actionId, status])
   @@map("action_executions")
 }
 

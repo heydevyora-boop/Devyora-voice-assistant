@@ -101,6 +101,22 @@ export const envSchema = z.object({
   AUDIO_RETENTION_DEFAULT: z.enum(['DISCARD', 'SESSION', 'RETAIN']).default('DISCARD'),
   AUDIO_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
 
+  // ── Action execution ──
+  /**
+   * How long one attempt may run. A handler that overruns it is aborted and
+   * the outcome is reported as unverified, because a timeout does not tell
+   * us whether the work had an effect first.
+   */
+  ACTION_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(20_000),
+  /**
+   * How long a claimed attempt may stay claimed before reconciliation gives
+   * up on it. Longer than the attempt timeout, so a slow but live attempt is
+   * not reconciled out from under itself.
+   */
+  ACTION_STALE_CLAIM_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+  /** How long a proposal awaits a decision. */
+  ACTION_CONFIRMATION_TTL_MS: z.coerce.number().int().min(5_000).max(3_600_000).default(90_000),
+
   // ── Voice sessions ──
   VOICE_SESSION_TTL_MS: z.coerce.number().int().min(10_000).max(1_800_000).default(300_000),
   /** How long a cancelled or finished session stays readable for a
