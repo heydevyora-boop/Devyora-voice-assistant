@@ -1,4 +1,9 @@
-import type { ActionKind, ExecutionMode, ExecutionStatus } from '@prisma/client';
+import type {
+  ActionKind,
+  ConnectionProvider,
+  ExecutionMode,
+  ExecutionStatus,
+} from '@prisma/client';
 import type { PrismaService } from '../../../database/prisma.service';
 import type { z } from 'zod';
 
@@ -63,6 +68,29 @@ export type IdempotencyStrategy =
  */
 export interface ActionDeps {
   readonly prisma: PrismaService;
+  /**
+   * Third-party connections.
+   *
+   * Typed structurally rather than by importing `ConnectionsService`, which
+   * would make this file depend on the integration module and turn a data
+   * declaration into a cycle. The one method a handler needs is the one
+   * that is named.
+   */
+  readonly integrations: {
+    execute(
+      userId: string,
+      provider: ConnectionProvider,
+      operation: string,
+      input: Record<string, unknown>,
+      meta?: { deviceId?: string },
+    ): Promise<{
+      fidelity: 'verified' | 'accepted' | 'prepared';
+      detail: string;
+      providerRef: string | null;
+      data: unknown;
+      connectorKind: string;
+    }>;
+  };
 }
 
 /** The shape a handler receives. Nothing here comes from a model. */

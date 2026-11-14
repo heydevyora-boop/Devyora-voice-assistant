@@ -6,6 +6,8 @@ import { SttRegistry } from '../../providers/stt/stt.module';
 import { TtsRegistry } from '../../providers/tts/tts.module';
 import { PushRegistry } from '../../providers/push/push.module';
 import { QueueService } from '../../jobs/queue.service';
+import { CryptoService } from '../../security/services/crypto.service';
+import { IntegrationRegistry } from '../integrations/integration.registry';
 
 export type DependencyState = 'up' | 'down' | 'not-configured';
 
@@ -43,6 +45,8 @@ export class HealthService {
     private readonly tts: TtsRegistry,
     private readonly push: PushRegistry,
     private readonly queue: QueueService,
+    private readonly crypto: CryptoService,
+    private readonly integrations: IntegrationRegistry,
   ) {}
 
   async checkDatabase(): Promise<DependencyReport> {
@@ -155,6 +159,39 @@ export class HealthService {
     };
   }
 
+  /**
+   * Credential encryption.
+   *
+   * Reported because its absence is not a degraded feature but a refused
+   * one: without a key, connecting a third-party account is turned down
+   * rather than storing a token in the clear. It does not fail readiness —
+   * everything else still works.
+   */
+  checkCredentialEncryption(): DependencyReport {
+    return this.crypto.available
+      ? { status: 'up', detail: `Key version ${this.crypto.version}.` }
+      : {
+          status: 'not-configured',
+          detail: 'No TOKEN_ENCRYPTION_KEY: third-party accounts cannot be connected.',
+        };
+  }
+
+  /** Which third-party integrations this deployment can actually offer. */
+  checkIntegrations(): DependencyReport {
+    const configured = this.integrations
+      .describe()
+      .filter((c) => c.kind === 'official-api' && c.configured)
+      .map((c) => c.provider);
+
+    if (configured.length === 0) {
+      return {
+        status: 'not-configured',
+        detail: 'No official integration is configured; assisted hand-off still works.',
+      };
+    }
+    return { status: 'up', detail: `Configured: ${configured.join(', ')}.` };
+  }
+
   async readiness(): Promise<ReadinessReport> {
     const checks: Record<string, DependencyReport> = {
       database: await this.checkDatabase(),
@@ -163,6 +200,8 @@ export class HealthService {
       synthesiser: this.checkSynthesiser(),
       scheduler: this.checkScheduler(),
       push: this.checkPush(),
+      credentialEncryption: this.checkCredentialEncryption(),
+      integrations: this.checkIntegrations(),
     };
 
     // Only a dependency the application actually requires can fail

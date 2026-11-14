@@ -17,6 +17,8 @@ import { SttService, type TranscriptionResult } from './stt.service';
 import { TtsService } from './tts.service';
 import { VoiceEventBus, type VoiceEventTarget } from './voice-event-bus';
 import type {
+  VoiceEvent,
+  VoiceEventPayload,
   ClarificationRequiredEvent,
   ConfirmationRequiredEvent,
   ResponseReadyEvent,
@@ -129,7 +131,7 @@ export class VoiceService {
 
     this.emit<SessionCreatedEvent>(
       session,
-      'session.created',
+      'assistant.session.created',
       {
         state: session.state,
         inputMode: session.inputMode,
@@ -141,7 +143,7 @@ export class VoiceService {
     if (input.inputMode !== VoiceInputMode.TEXT) {
       await this.sessions.transitionTo(session.id, State.CREATED, State.LISTENING);
       const listening = await this.sessions.requireOwned(input.userId, session.id);
-      this.emit(listening, 'listening.started', { state: listening.state }, { deviceOnly: true });
+      this.emit(listening, 'assistant.listening', { state: listening.state }, { deviceOnly: true });
       return describeSession(listening);
     }
 
@@ -163,7 +165,7 @@ export class VoiceService {
     // half-heard sentences is a worse thing to keep than the final one.
     this.emit<TranscriptPartialEvent>(
       session,
-      'transcript.partial',
+      'assistant.transcript.partial',
       { text: text.slice(0, 2_000), isMock: false },
       { deviceOnly: true },
     );
@@ -341,7 +343,7 @@ export class VoiceService {
 
     this.emit<TranscriptFinalEvent>(
       updated,
-      'transcript.final',
+      'assistant.transcript.final',
       {
         text: transcription.text,
         detectedLanguage: transcription.detectedLanguage,
@@ -352,7 +354,7 @@ export class VoiceService {
       { deviceOnly: true },
     );
 
-    this.emit(updated, 'processing.started', { state: updated.state }, { deviceOnly: true });
+    this.emit(updated, 'assistant.processing', { state: updated.state }, { deviceOnly: true });
     return updated;
   }
 
@@ -405,7 +407,7 @@ export class VoiceService {
     if (turn.clarification) {
       this.emit<ClarificationRequiredEvent>(
         updated,
-        'clarification.required',
+        'assistant.clarification.required',
         {
           question: turn.clarification.question,
           reason: turn.clarification.reason,
@@ -422,7 +424,7 @@ export class VoiceService {
       // confirmation is a decision the person makes, and they may be
       // looking at a different screen. Acting on it still requires the
       // owning device — see `VoiceSessionService.requireOwned`.
-      this.emit<ConfirmationRequiredEvent>(updated, 'confirmation.required', {
+      this.emit<ConfirmationRequiredEvent>(updated, 'assistant.confirmation.required', {
         pendingActionId: turn.plan.pendingActionId,
         kind: turn.plan.kind,
         intent: turn.plan.intent,
@@ -449,7 +451,7 @@ export class VoiceService {
       speechUnavailable = outcome.reason;
     }
 
-    this.emit<ResponseReadyEvent>(updated, 'response.ready', {
+    this.emit<ResponseReadyEvent>(updated, 'assistant.response.ready', {
       text: turn.reply,
       intent: turn.intent,
       status: turn.status,
@@ -458,7 +460,7 @@ export class VoiceService {
     });
 
     if (turn.status === 'failed') {
-      this.emit<SessionFailedEvent>(updated, 'session.failed', {
+      this.emit<SessionFailedEvent>(updated, 'assistant.session.failed', {
         code: turn.problem?.code.toLowerCase() ?? 'assistant_failed',
         detail: turn.reply,
         retryable: true,
@@ -577,7 +579,7 @@ export class VoiceService {
     const removed = await this.discardSessionAudio(sessionId, { includeRetained: true });
 
     if (!alreadyEnded) {
-      const event = await this.sessions.recordEvent(session.id, 'session.cancelled', { by });
+      const event = await this.sessions.recordEvent(session, 'assistant.session.cancelled', { by });
       this.bus.publish(event, {
         userId: session.userId,
         deviceId: session.deviceId,
@@ -678,7 +680,7 @@ export class VoiceService {
       const failed = await this.sessions.transitionTo(session.id, session.state, State.FAILED, {
         failureCode: code.slice(0, 40),
       });
-      this.emit<SessionFailedEvent>(failed, 'session.failed', { code, detail, retryable });
+      this.emit<SessionFailedEvent>(failed, 'assistant.session.failed', { code, detail, retryable });
     } catch (error) {
       // The session had already moved — most likely it was cancelled while
       // the provider was working. Not worth masking the original failure.
@@ -691,10 +693,10 @@ export class VoiceService {
 
   // ──────────────────────────────────────────────────────────── plumbing
 
-  private emit<T extends { type: string }>(
+  private emit<T extends VoiceEvent>(
     session: VoiceSession,
-    type: T extends { type: infer K } ? K : never,
-    payload: Omit<T, 'sessionId' | 'seq' | 'at' | 'type'>,
+    type: T['type'],
+    payload: VoiceEventPayload<T>,
     options: { deviceOnly?: boolean } = {},
   ): void {
     const target: VoiceEventTarget = {
@@ -708,7 +710,7 @@ export class VoiceService {
     // caller: a socket write must not sit in the path of the response, and
     // a logging failure must not fail the turn.
     void this.sessions
-      .recordEvent(session.id, type as never, payload as never)
+      .recordEvent(session, type as never, payload as never)
       .then((event) => this.bus.publish(event, target))
       .catch((error: unknown) =>
         this.logger.error(

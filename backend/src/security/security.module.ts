@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuditService } from './services/audit.service';
+import { CryptoService } from './services/crypto.service';
 import { PrincipalService } from './services/principal.service';
 import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
@@ -18,7 +19,7 @@ import { TokenService } from './services/token.service';
 @Global()
 @Module({
   imports: [JwtModule.register({})],
-  providers: [PasswordService, TokenService, AuditService, PrincipalService],
-  exports: [PasswordService, TokenService, AuditService, PrincipalService],
+  providers: [PasswordService, TokenService, AuditService, PrincipalService, CryptoService],
+  exports: [PasswordService, TokenService, AuditService, PrincipalService, CryptoService],
 })
 export class SecurityModule {}

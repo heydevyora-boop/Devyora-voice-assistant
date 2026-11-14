@@ -169,6 +169,26 @@ export const envSchema = z.object({
   /** How far ahead the upcoming-reminders view looks, in days. */
   REMINDER_UPCOMING_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
+  // ── Third-party integrations ──
+  // No credential is required. Without one the provider reports itself
+  // unconfigured and a user cannot start its OAuth flow — the assisted
+  // route, which needs no account, still works.
+  /** Where provider callbacks land. The provider path is appended. */
+  INTEGRATION_REDIRECT_BASE_URL: z
+    .string()
+    .url()
+    .default('http://localhost:3000/api/v1/integrations/callback'),
+  INTEGRATION_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
+  /** Refresh an access token this long before it expires. */
+  INTEGRATION_REFRESH_LEAD_MS: z.coerce.number().int().min(60_000).max(3_600_000).default(300_000),
+
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  META_APP_ID: z.string().optional(),
+  META_APP_SECRET: z.string().optional(),
+  /** The business phone number WhatsApp sends from. */
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+
   // ── Reserved for later chunks; absent is valid today. ──
   JWT_ACCESS_SECRET: z.string().optional(),
   JWT_ACCESS_TTL: z.string().default('10m'),

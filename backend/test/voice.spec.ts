@@ -640,10 +640,10 @@ describe('voice pipeline', () => {
 
       const { events } = (res.body as Envelope<{ events: { type: string; seq: number }[] }>).data;
       const types = events.map((e) => e.type);
-      expect(types).toContain('session.created');
-      expect(types).toContain('transcript.final');
-      expect(types).toContain('processing.started');
-      expect(types).toContain('response.ready');
+      expect(types).toContain('assistant.session.created');
+      expect(types).toContain('assistant.transcript.final');
+      expect(types).toContain('assistant.processing');
+      expect(types).toContain('assistant.response.ready');
       // Monotonic from 1, with no gaps, which is what makes "everything
       // after 4" a safe question.
       expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
@@ -691,8 +691,8 @@ describe('voice pipeline', () => {
       });
       // An interim guess is not a record of what someone said, and a
       // sequence of half-heard sentences is a worse thing to keep.
-      expect(stored.map((e) => e.type)).not.toContain('transcript.partial');
-      expect(EPHEMERAL_EVENTS.has('transcript.partial')).toBe(true);
+      expect(stored.map((e) => e.type)).not.toContain('assistant.transcript.partial');
+      expect(EPHEMERAL_EVENTS.has('assistant.transcript.partial')).toBe(true);
     });
 
     it('publishes events on the bus with the right audience', async () => {
@@ -722,12 +722,12 @@ describe('voice pipeline', () => {
         await settle();
 
         // What is being said into this device is that device's business.
-        const transcript = seen.find((e) => e.type === 'transcript.final');
+        const transcript = seen.find((e) => e.type === 'assistant.transcript.final');
         expect(transcript?.deviceOnly).toBe(true);
 
         // A confirmation is a decision the person makes, and they may be
         // looking at another screen.
-        const confirmation = seen.find((e) => e.type === 'confirmation.required');
+        const confirmation = seen.find((e) => e.type === 'assistant.confirmation.required');
         expect(confirmation?.deviceOnly).toBe(false);
       } finally {
         off();

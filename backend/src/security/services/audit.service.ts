@@ -41,6 +41,17 @@ export const AuditAction = {
   ACTION_FAILED: 'action.failed',
   ACTION_CANCELLED: 'action.cancelled',
   ASSISTANT_PREFERENCES_CHANGED: 'assistant.preferences.changed',
+  // Integrations. Starting, finishing and failing an authorisation are
+  // separate facts, and a reader of this table should be able to tell a
+  // replayed callback from a forged one.
+  INTEGRATION_AUTH_STARTED: 'integration.auth.started',
+  INTEGRATION_AUTH_FAILED: 'integration.auth.failed',
+  INTEGRATION_CONNECTED: 'integration.connected',
+  INTEGRATION_REFRESHED: 'integration.refreshed',
+  INTEGRATION_REFRESH_FAILED: 'integration.refresh_failed',
+  INTEGRATION_DISCONNECTED: 'integration.disconnected',
+  INTEGRATION_REVOKED: 'integration.revoked',
+  INTEGRATION_OPERATION: 'integration.operation',
 } as const;
 
 export type AuditActionValue = (typeof AuditAction)[keyof typeof AuditAction];

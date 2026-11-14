@@ -75,14 +75,16 @@ src/
 ├── database/    Prisma service, lifecycle, transactions, tenant scoping
 ├── modules/     feature modules — health, auth, users, devices,
 │                ai, conversations, assistant, voice, actions,
-│                notes, reminders, sync, notifications
+│                notes, reminders, sync, notifications, integrations
 ├── providers/   external adapters: shared reliability + error vocabulary,
-│                llm/, stt/, tts/; OAuth                      (Chunk 8)
-├── gateways/    cross-module WebSocket fan-out                (Chunk 6)
-│                (the voice gateway lives with its module)
-├── jobs/        BullMQ queues and processors                  (Chunk 6)
-├── events/      in-process domain events                      (Chunk 6)
-└── security/    auth guard, ownership, rate limit, audit, crypto (Chunks 3, 8)
+│                llm/, stt/, tts/, push/, integrations/
+├── gateways/    cross-module WebSocket fan-out
+│                (the voice/assistant gateway lives with its module)
+├── jobs/        BullMQ queues and workers: reminders, notifications,
+│                token refresh, cleanup and retention sweeps
+├── events/      the in-process event seam (AssistantEventsModule),
+│                so a publisher never imports a consumer's module
+└── security/    auth guard, ownership, rate limit, audit, crypto
 ```
 
 ## Conventions
@@ -204,6 +206,25 @@ cannot observe one.
 implementation of "is this credential currently good", used by both the HTTP
 guard and the WebSocket handshake. An authorization check that exists twice
 is one that will eventually differ in one of them.
+
+**A connector never claims more than it can verify.** `fidelity` is
+`verified`, `accepted` or `prepared`, declared per operation. WhatsApp,
+Instagram and Messenger report a send as `accepted` — delivery is confirmed
+by webhook, which this build does not receive — and the user-assisted route
+(the only option for a personal WhatsApp account, which has no official API
+at all) reports `prepared` and never claims a message left the account. See
+[docs/integrations-and-realtime.md](docs/integrations-and-realtime.md).
+
+**A credential never leaves `ConnectionsService`.** Every response type has
+no token field; the only plaintext access token in this codebase is a local
+variable for the duration of one provider call. OAuth state is a single-use
+server-side row, checked against the user **and** device that started the
+flow — the CSRF defence for the callback.
+
+**Every assistant event carries its own identity.** `id`, `userId`,
+`deviceId`, `sessionId` and a sequence number, so a reconnecting client can
+tell a replayed event from a new one without comparing contents, and a
+confirmation is never broadcast to a device that did not raise it.
 
 ## Security notes for later chunks
 

@@ -25,6 +25,8 @@ import { NotesModule } from './modules/notes/notes.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { AssistantEventsModule } from './events/assistant-events.module';
 import { SttModule } from './providers/stt/stt.module';
 import { TtsModule } from './providers/tts/tts.module';
 import { VoiceModule } from './modules/voice/voice.module';
@@ -44,6 +46,9 @@ import { VoiceModule } from './modules/voice/voice.module';
     AppConfigModule,
     PrismaModule,
     SecurityModule,
+    // The in-process event seam. Global, so a publisher and a consumer
+    // never have to import each other.
+    AssistantEventsModule,
 
     // In-memory counters today. Chunk 6 introduces Redis, which is what
     // makes these limits hold across more than one instance.
@@ -72,6 +77,10 @@ import { VoiceModule } from './modules/voice/voice.module';
     NotesModule,
     RemindersModule,
     SyncModule,
+
+    // Third-party accounts. Global, so the action layer and the workers can
+    // reach the connections service without importing the whole module.
+    IntegrationsModule,
 
     // Delivery. PushModule is global; listed so the wiring is visible here
     // rather than only by side effect. JobsModule must come after the

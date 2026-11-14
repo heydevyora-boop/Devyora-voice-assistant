@@ -9,20 +9,46 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import type { Server, Socket } from 'socket.io';
+import type { Namespace, Socket } from 'socket.io';
 import { AppConfigService } from '../../config/app-config.module';
 import { PrincipalService, type ResolvedPrincipal } from '../../security/services/principal.service';
 import { VoiceEventBus, type VoiceEventTarget } from './voice-event-bus';
-import { voiceRoom, type VoiceEvent } from './voice-events';
+import { VOICE_EVENTS, voiceRoom, type VoiceEvent } from './voice-events';
 import { describeSession, VoiceSessionService } from './voice-session.service';
 import { VoiceService } from './voice.service';
 
 /** What the socket knows about its own connection. */
 interface SocketState {
   readonly principal: ResolvedPrincipal;
+  /** When the client last proved it was alive. */
+  lastSeenAt: number;
+  /**
+   * Ids recently delivered to this socket, newest last.
+   *
+   * The gateway's half of duplicate handling: a reconnecting client is
+   * given a replay that may overlap what it already had live, and this
+   * stops the same event being written twice onto one connection. The
+   * client has the event id too, so it can do the same — belt and braces,
+   * because either side alone can be wrong after a reconnect.
+   */
+  readonly delivered: string[];
 }
 
 const states = new WeakMap<Socket, SocketState>();
+
+/** How many ids to remember per socket. A turn produces under a dozen. */
+const DEDUPE_WINDOW = 200;
+
+/**
+ * How long a socket may go without a heartbeat before it is dropped.
+ *
+ * socket.io has its own ping/pong at the transport level; this is an
+ * application-level check on top, because a socket can be TCP-alive while
+ * the client is wedged — and a wedged client holding a room membership
+ * means events delivered nowhere.
+ */
+const HEARTBEAT_TIMEOUT_MS = 90_000;
+const HEARTBEAT_SWEEP_MS = 30_000;
 
 /**
  * The real-time transport for voice.
@@ -63,9 +89,16 @@ export class VoiceGateway
 {
   private readonly logger = new Logger(VoiceGateway.name);
   private unsubscribe: (() => void) | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
+  // With a namespace configured on the gateway, what Nest injects here at
+  // runtime is the Namespace instance (`io.of('/assistant')`), not the
+  // top-level Server — so it is typed as such. Typing it as `Server` is a
+  // common mistake that compiles (the two share many members) but resolves
+  // `.adapter` to the Server's adapter-constructor setter instead of the
+  // Namespace's actual Adapter instance.
   @WebSocketServer()
-  private server!: Server;
+  private server!: Namespace;
 
   constructor(
     private readonly principals: PrincipalService,
@@ -77,6 +110,12 @@ export class VoiceGateway
 
   afterInit(): void {
     this.unsubscribe = this.bus.subscribe((event, target) => this.deliver(event, target));
+
+    // Application-level liveness. A socket that stops answering is dropped
+    // rather than left holding a room membership that delivers nowhere.
+    this.heartbeatTimer = setInterval(() => this.sweepStaleSockets(), HEARTBEAT_SWEEP_MS);
+    // Not unref'd: the interval is cleared in onModuleDestroy, and an
+    // unref'd timer would let a shutdown race it.
 
     if (!this.config.providers.redisUrl) {
       // Said once, at startup, because it is a real limitation rather than
@@ -92,6 +131,31 @@ export class VoiceGateway
   onModuleDestroy(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  /**
+   * Drops sockets that have stopped answering.
+   *
+   * Only sockets this gateway authenticated are considered; anything else
+   * has already been disconnected.
+   */
+  private sweepStaleSockets(): void {
+    if (!this.server) return;
+
+    const cutoff = Date.now() - HEARTBEAT_TIMEOUT_MS;
+    for (const socket of this.server.sockets.values()) {
+      const state = states.get(socket);
+      if (!state) continue;
+      if (state.lastSeenAt < cutoff) {
+        socket.emit('error', { code: 'HEARTBEAT_TIMEOUT' });
+        socket.disconnect(true);
+      }
+    }
   }
 
   // ───────────────────────────────────────────────────────── connection
@@ -113,7 +177,7 @@ export class VoiceGateway
       return;
     }
 
-    states.set(socket, { principal });
+    states.set(socket, { principal, lastSeenAt: Date.now(), delivered: [] });
     await socket.join(voiceRoom.user(principal.userId));
     await socket.join(voiceRoom.device(principal.deviceId));
 
@@ -122,9 +186,14 @@ export class VoiceGateway
     socket.emit('connected', {
       userId: principal.userId,
       deviceId: principal.deviceId,
-      // Told up front, so a client knows whether to expect spoken replies
-      // and whether transcripts are real.
+      // Told up front, so a client knows what to expect of this connection.
       interpreter: { events: 'in-process' },
+      heartbeat: {
+        /** Send `assistant.ping` at least this often to stay connected. */
+        intervalMs: HEARTBEAT_SWEEP_MS,
+        timeoutMs: HEARTBEAT_TIMEOUT_MS,
+      },
+      events: VOICE_EVENTS,
     });
   }
 
@@ -136,6 +205,20 @@ export class VoiceGateway
   }
 
   // ─────────────────────────────────────────────────────────── messages
+
+  /**
+   * Liveness.
+   *
+   * A client sends this periodically; the reply carries the server's clock
+   * so a client can also see its own drift. Any other message counts as
+   * liveness too — this exists for an idle connection with nothing to say.
+   */
+  @SubscribeMessage('assistant.ping')
+  ping(@ConnectedSocket() socket: Socket): { ok: boolean; at: string } {
+    const state = states.get(socket);
+    if (state) state.lastSeenAt = Date.now();
+    return { ok: Boolean(state), at: new Date().toISOString() };
+  }
 
   /**
    * Reconnection.
@@ -152,6 +235,7 @@ export class VoiceGateway
   ): Promise<{ ok: boolean; code?: string; session?: unknown; events?: VoiceEvent[] }> {
     const state = states.get(socket);
     if (!state) return { ok: false, code: 'UNAUTHENTICATED' };
+    state.lastSeenAt = Date.now();
 
     const parsed = parseResume(body);
     if (!parsed) return { ok: false, code: 'BAD_REQUEST' };
@@ -165,6 +249,11 @@ export class VoiceGateway
         state.principal.deviceId,
       );
       await socket.join(voiceRoom.session(session.id));
+
+      // Remembered, so an event that arrives live a moment later is
+      // recognised as one this socket already has.
+      for (const event of events) this.remember(state, event.id);
+
       return { ok: true, session: describeSession(session), events };
     } catch {
       // Another user's or another device's session reads as missing, as it
@@ -186,6 +275,7 @@ export class VoiceGateway
   ): Promise<{ ok: boolean; code?: string }> {
     const state = states.get(socket);
     if (!state) return { ok: false, code: 'UNAUTHENTICATED' };
+    state.lastSeenAt = Date.now();
 
     const parsed = parsePartial(body);
     if (!parsed) return { ok: false, code: 'BAD_REQUEST' };
@@ -211,6 +301,7 @@ export class VoiceGateway
   ): Promise<{ ok: boolean; code?: string }> {
     const state = states.get(socket);
     if (!state) return { ok: false, code: 'UNAUTHENTICATED' };
+    state.lastSeenAt = Date.now();
 
     const parsed = parseResume(body);
     if (!parsed) return { ok: false, code: 'BAD_REQUEST' };
@@ -265,7 +356,39 @@ export class VoiceGateway
       ? voiceRoom.device(target.deviceId)
       : voiceRoom.user(target.userId);
 
-    this.server.to(room).emit(event.type, event);
+    // Emitted per socket rather than to the room, so a socket that already
+    // holds this event — because a replay overlapped a live push — is
+    // skipped. Room-level emit cannot do that, and a client drawing the
+    // same confirmation twice is the visible symptom.
+    // `this.server` is the namespace (`/assistant`), and on a Namespace the
+    // adapter lives on the namespace itself — not under `.sockets`, which
+    // is just the Map of connected sockets. Getting this wrong throws
+    // inside the bus listener, which VoiceEventBus.publish catches and
+    // logs, so the failure mode is silent delivery rather than a crash.
+    const sockets = this.server.adapter.rooms.get(room);
+    if (!sockets) return;
+
+    for (const socketId of sockets) {
+      const socket = this.server.sockets.get(socketId);
+      if (!socket) continue;
+
+      const state = states.get(socket);
+      if (!state) continue;
+
+      if (event.id && state.delivered.includes(event.id)) continue;
+      this.remember(state, event.id);
+
+      socket.emit(event.type, event);
+    }
+  }
+
+  /** Records a delivered id, keeping the window bounded. */
+  private remember(state: SocketState, id: string | undefined): void {
+    if (!id) return;
+    state.delivered.push(id);
+    if (state.delivered.length > DEDUPE_WINDOW) {
+      state.delivered.splice(0, state.delivered.length - DEDUPE_WINDOW);
+    }
   }
 }
 

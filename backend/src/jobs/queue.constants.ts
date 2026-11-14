@@ -40,6 +40,10 @@ export const JOB = {
   purgeDeleted: 'maintenance.purge-deleted',
   /** Mark abandoned action attempts as unverified. */
   reconcileActions: 'maintenance.reconcile-actions',
+  /** Renew third-party access tokens that are close to expiry. */
+  refreshIntegrations: 'maintenance.refresh-integrations',
+  /** Remove spent OAuth state records. */
+  purgeOauthStates: 'maintenance.purge-oauth-states',
 } as const;
 
 export type JobName = (typeof JOB)[keyof typeof JOB];
@@ -77,7 +81,11 @@ export const MAINTENANCE_SCHEDULE: readonly {
   { name: JOB.reconcileReminders, everyMs: 60_000, key: 'reconcile-reminders' },
   { name: JOB.expireStale, everyMs: 300_000, key: 'expire-stale' },
   { name: JOB.reconcileActions, everyMs: 120_000, key: 'reconcile-actions' },
+  // Ahead of the refresh lead time, so a token is renewed before anything
+  // tries to use an expired one.
+  { name: JOB.refreshIntegrations, everyMs: 120_000, key: 'refresh-integrations' },
   { name: JOB.cleanupAudio, everyMs: 600_000, key: 'cleanup-audio' },
+  { name: JOB.purgeOauthStates, everyMs: 3_600_000, key: 'purge-oauth-states' },
   { name: JOB.cleanupSessions, everyMs: 3_600_000, key: 'cleanup-sessions' },
   { name: JOB.purgeDeleted, everyMs: 21_600_000, key: 'purge-deleted' },
 ];

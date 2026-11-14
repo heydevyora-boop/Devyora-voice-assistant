@@ -155,11 +155,15 @@ describe('voice gateway', () => {
       await once(socket, 'connected');
 
       const bus = app.get(VoiceEventBus);
-      const waiting = once<{ type: string; text: string }>(socket, 'transcript.final');
+      const waiting = once<{ type: string; text: string }>(socket, 'assistant.transcript.final');
 
       bus.publish(
         {
-          type: 'transcript.final',
+          type: 'assistant.transcript.final',
+          id: `evt-${Math.random().toString(36).slice(2)}`,
+          userId: account.userId,
+          deviceId: account.deviceId,
+          correlationId: null,
           sessionId: '00000000-0000-4000-8000-000000000000',
           seq: 1,
           at: new Date().toISOString(),
@@ -187,11 +191,15 @@ describe('voice gateway', () => {
       await once(socket, 'connected');
 
       const bus = app.get(VoiceEventBus);
-      const waiting = once<{ pendingActionId: string }>(socket, 'confirmation.required');
+      const waiting = once<{ pendingActionId: string }>(socket, 'assistant.confirmation.required');
 
       bus.publish(
         {
-          type: 'confirmation.required',
+          type: 'assistant.confirmation.required',
+          id: `evt-${Math.random().toString(36).slice(2)}`,
+          userId: account.userId,
+          deviceId: account.deviceId,
+          correlationId: null,
           sessionId: '00000000-0000-4000-8000-000000000001',
           seq: 2,
           at: new Date().toISOString(),
@@ -227,7 +235,11 @@ describe('voice gateway', () => {
 
       app.get(VoiceEventBus).publish(
         {
-          type: 'response.ready',
+          type: 'assistant.response.ready',
+          id: `evt-${Math.random().toString(36).slice(2)}`,
+          userId: owner.userId,
+          deviceId: owner.deviceId,
+          correlationId: null,
           sessionId: '00000000-0000-4000-8000-000000000002',
           seq: 1,
           at: new Date().toISOString(),
@@ -293,8 +305,8 @@ describe('voice gateway', () => {
       // client rejoins is already finished.
       expect(replay.session!.state).toBe('COMPLETED');
       const types = replay.events!.map((e) => e.type);
-      expect(types).toContain('transcript.final');
-      expect(types).toContain('response.ready');
+      expect(types).toContain('assistant.transcript.final');
+      expect(types).toContain('assistant.response.ready');
       // Nothing was re-run: these were recorded as they happened.
       expect(replay.events!.map((e) => e.seq)).toEqual(replay.events!.map((_, i) => i + 1));
     }, 30_000);
@@ -421,7 +433,7 @@ describe('voice gateway', () => {
       const socket = connect(account.access);
       await once(socket, 'connected');
 
-      const waiting = once<{ text: string; isMock: boolean }>(socket, 'transcript.partial');
+      const waiting = once<{ text: string; isMock: boolean }>(socket, 'assistant.transcript.partial');
       const ack = await emit<{ ok: boolean }>(socket, 'voice.transcript.partial', {
         sessionId,
         text: 'buy mi',
@@ -436,7 +448,7 @@ describe('voice gateway', () => {
         where: { voiceSessionId: sessionId },
         select: { type: true },
       });
-      expect(stored.map((e) => e.type)).not.toContain('transcript.partial');
+      expect(stored.map((e) => e.type)).not.toContain('assistant.transcript.partial');
     }, 30_000);
 
     it('cancels a session over the socket', async () => {
@@ -495,6 +507,306 @@ describe('voice gateway', () => {
       const row = await prisma.voiceSession.findUniqueOrThrow({ where: { id: sessionId } });
       expect(row.state).toBe('LISTENING');
       expect(row.endedAt).toBeNull();
+    }, 30_000);
+  });
+
+  // ──────────────────────────────────────────────────────── the envelope
+
+  describe('the event envelope', () => {
+    it('gives every event an id, a type, a timestamp, and the owning user and device', async () => {
+      const account = await newAccount();
+      llm.script(/.*/, {
+        command: { intent: 'save_note', entities: { text: 'buy milk' } },
+        confidence: 0.95,
+        clarification: null,
+        reply: 'Saved it.',
+        detectedLanguage: 'en-IN',
+      });
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+
+      const started = await request(http())
+        .post('/api/v1/voice/sessions')
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ inputMode: 'TEXT' })
+        .expect(201);
+      const sessionId = (started.body as Envelope<{ id: string }>).data.id;
+      socket.emit('voice.resume', { sessionId, afterSeq: 0 }, () => undefined);
+
+      const waiting = once<{
+        id: string;
+        type: string;
+        at: string;
+        userId: string;
+        deviceId: string;
+        sessionId: string;
+        seq: number;
+        correlationId: string | null;
+      }>(socket, 'assistant.response.ready');
+
+      await request(http())
+        .post(`/api/v1/voice/sessions/${sessionId}/transcript`)
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ text: 'note: buy milk' })
+        .expect(201);
+
+      const event = await waiting;
+      expect(event.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(event.type).toBe('assistant.response.ready');
+      expect(Number.isFinite(Date.parse(event.at))).toBe(true);
+      expect(event.userId).toBe(account.userId);
+      expect(event.deviceId).toBe(account.deviceId);
+      expect(event.sessionId).toBe(sessionId);
+      expect(event.seq).toBeGreaterThan(0);
+    }, 30_000);
+
+    it('publishes under the assistant.* names the brief specifies', async () => {
+      const account = await newAccount();
+      llm.script(/.*/, {
+        command: { intent: 'save_note', entities: { text: 'buy milk' } },
+        confidence: 0.95,
+        clarification: null,
+        reply: 'Saved it.',
+        detectedLanguage: 'en-IN',
+      });
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+
+      const started = await request(http())
+        .post('/api/v1/voice/sessions')
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ inputMode: 'TEXT' })
+        .expect(201);
+      const sessionId = (started.body as Envelope<{ id: string }>).data.id;
+
+      const waiting = once(socket, 'assistant.transcript.final');
+      await request(http())
+        .post(`/api/v1/voice/sessions/${sessionId}/transcript`)
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ text: 'note: buy milk' })
+        .expect(201);
+      await waiting;
+    }, 30_000);
+  });
+
+  // ─────────────────────────────────────────────────────────── heartbeat
+
+  describe('heartbeat', () => {
+    it('answers a ping with the server clock', async () => {
+      const account = await newAccount();
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+
+      const reply = await emit<{ ok: boolean; at: string }>(socket, 'assistant.ping', {});
+      expect(reply.ok).toBe(true);
+      expect(Number.isFinite(Date.parse(reply.at))).toBe(true);
+    }, 20_000);
+
+    it('tells a connecting client how often to ping and how long it has', async () => {
+      const account = await newAccount();
+      const socket = connect(account.access);
+      const connected = await once<{
+        heartbeat: { intervalMs: number; timeoutMs: number };
+        events: string[];
+      }>(socket, 'connected');
+
+      expect(connected.heartbeat.intervalMs).toBeGreaterThan(0);
+      expect(connected.heartbeat.timeoutMs).toBeGreaterThan(connected.heartbeat.intervalMs);
+      // The published vocabulary, so a client can validate against it
+      // rather than discovering event names by observation.
+      expect(connected.events).toContain('assistant.response.ready');
+      expect(connected.events).toContain('assistant.action.completed');
+    }, 20_000);
+  });
+
+  // ────────────────────────────────────────────────── duplicate handling
+
+  describe('duplicate event handling', () => {
+    it('does not deliver the same event twice to one socket after a replay overlaps a live push', async () => {
+      const account = await newAccount();
+      llm.script(/.*/, {
+        command: { intent: 'save_note', entities: { text: 'buy milk' } },
+        confidence: 0.95,
+        clarification: null,
+        reply: 'Saved it.',
+        detectedLanguage: 'en-IN',
+      });
+
+      const started = await request(http())
+        .post('/api/v1/voice/sessions')
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ inputMode: 'TEXT' })
+        .expect(201);
+      const sessionId = (started.body as Envelope<{ id: string }>).data.id;
+
+      await request(http())
+        .post(`/api/v1/voice/sessions/${sessionId}/transcript`)
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ text: 'note: buy milk' })
+        .expect(201);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+
+      let received = 0;
+      socket.onAny(() => {
+        received += 1;
+      });
+
+      // Resuming replays every stored event for this session, including
+      // assistant.response.ready.
+      await emit(socket, 'voice.resume', { sessionId, afterSeq: 0 });
+      const afterReplay = received;
+
+      // A live publish of the *same* stored event — the scenario a
+      // reconnect racing a slow-arriving push produces.
+      const bus = app.get(VoiceEventBus);
+      const stored = await prisma.voiceSessionEvent.findFirstOrThrow({
+        where: { voiceSessionId: sessionId, type: 'assistant.response.ready' },
+      });
+      bus.publish(
+        {
+          type: 'assistant.response.ready',
+          id: stored.id,
+          userId: account.userId,
+          deviceId: account.deviceId,
+          sessionId,
+          seq: stored.seq,
+          at: stored.createdAt.toISOString(),
+          correlationId: null,
+          ...(stored.payload as object),
+        } as never,
+        { userId: account.userId, deviceId: account.deviceId, sessionId, deviceOnly: true },
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Nothing new arrived: the gateway recognised the id it had already
+      // delivered during the replay.
+      expect(received).toBe(afterReplay);
+    }, 30_000);
+  });
+
+  // ──────────────────────────────────────────────────── action execution
+
+  describe('action execution events', () => {
+    it('announces a started, then a completed event for an action run from a voice turn', async () => {
+      const account = await newAccount();
+      llm.script(/.*/, {
+        command: { intent: 'save_note', entities: { text: 'buy milk' } },
+        confidence: 0.95,
+        clarification: null,
+        reply: 'Saved it.',
+        detectedLanguage: 'en-IN',
+      });
+
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+
+      const started = await request(http())
+        .post('/api/v1/voice/sessions')
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ inputMode: 'TEXT' })
+        .expect(201);
+      const sessionId = (started.body as Envelope<{ id: string }>).data.id;
+      await emit(socket, 'voice.resume', { sessionId, afterSeq: 0 });
+
+      const waitingStarted = once<{
+        pendingActionId: string;
+        actionId: string;
+        executionId: string;
+      }>(socket, 'assistant.action.started');
+      const waitingCompleted = once<{
+        actionId: string;
+        status: string;
+        verified: boolean;
+      }>(socket, 'assistant.action.completed');
+
+      await request(http())
+        .post(`/api/v1/voice/sessions/${sessionId}/transcript`)
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ text: 'note: buy milk' })
+        .expect(201);
+
+      const startedEvent = await waitingStarted;
+      expect(startedEvent.actionId).toBe('notes.create');
+
+      const completedEvent = await waitingCompleted;
+      expect(completedEvent.actionId).toBe('notes.create');
+      expect(completedEvent.status).toBe('COMPLETED');
+      expect(completedEvent.verified).toBe(true);
+    }, 30_000);
+
+    it('reports a hand-off action as HANDOFF, never as completed success', async () => {
+      const account = await newAccount();
+      llm.script(/.*/, {
+        command: { intent: 'open_application', entities: { application: 'spotify' } },
+        confidence: 0.9,
+        clarification: null,
+        reply: 'Opening Spotify.',
+        detectedLanguage: 'en-IN',
+      });
+
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+
+      const started = await request(http())
+        .post('/api/v1/voice/sessions')
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ inputMode: 'TEXT' })
+        .expect(201);
+      const sessionId = (started.body as Envelope<{ id: string }>).data.id;
+      await emit(socket, 'voice.resume', { sessionId, afterSeq: 0 });
+
+      const waitingCompleted = once<{ status: string; verified: boolean }>(
+        socket,
+        'assistant.action.completed',
+      );
+
+      await request(http())
+        .post(`/api/v1/voice/sessions/${sessionId}/transcript`)
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ text: 'open spotify' })
+        .expect(201);
+
+      const event = await waitingCompleted;
+      // A client must be able to see this is not success even while
+      // listening on the "completed" name — the status field, not the
+      // event name, is what carries that.
+      expect(event.status).toBe('HANDOFF');
+      expect(event.verified).toBe(false);
+    }, 30_000);
+
+    it('sends no action events for a turn made outside a voice session', async () => {
+      // A REST-only confirmation has no voice session for a client to be
+      // watching, so the executor must not try to address one.
+      const account = await newAccount();
+      llm.script(/.*/, {
+        command: { intent: 'save_note', entities: { text: 'buy milk' } },
+        confidence: 0.95,
+        clarification: null,
+        reply: 'Saved it.',
+        detectedLanguage: 'en-IN',
+      });
+
+      const socket = connect(account.access);
+      await once(socket, 'connected');
+      let sawActionEvent = false;
+      socket.on('assistant.action.started', () => {
+        sawActionEvent = true;
+      });
+      socket.on('assistant.action.completed', () => {
+        sawActionEvent = true;
+      });
+
+      await request(http())
+        .post('/api/v1/assistant/turn')
+        .set({ Authorization: `Bearer ${account.access}` })
+        .send({ text: 'note: buy milk' })
+        .expect(201);
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(sawActionEvent).toBe(false);
     }, 30_000);
   });
 });

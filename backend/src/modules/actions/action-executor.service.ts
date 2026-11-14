@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   ExecutionStatus,
@@ -10,6 +10,8 @@ import { AppError } from '../../common/errors/app-error';
 import { AppConfigService } from '../../config/app-config.module';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditAction, AuditService } from '../../security/services/audit.service';
+import { VoiceEventBus } from '../voice/voice-event-bus';
+import { ConnectionsService } from '../integrations/connections.service';
 import { ActionRegistry } from './registry/action.registry';
 import { PermissionsService, type Denial } from './permissions.service';
 import {
@@ -84,6 +86,8 @@ export class ActionExecutorService {
     private readonly permissions: PermissionsService,
     private readonly audit: AuditService,
     private readonly config: AppConfigService,
+    private readonly events: VoiceEventBus,
+    private readonly integrations: ConnectionsService,
   ) {}
 
   // ─────────────────────────────────────────────────────────── the lifecycle
@@ -194,6 +198,14 @@ export class ActionExecutorService {
 
     const { executionId } = claim;
 
+    // Announced before the handler runs, so a client shows work in
+    // progress rather than a frozen orb while a provider is called.
+    this.announce(pending, 'assistant.action.started', {
+      pendingActionId: pending.id,
+      actionId: action.id,
+      executionId,
+    });
+
     // ── 6. EXECUTION ───────────────────────────────────────────────────
     // Outside the transaction: a handler may be slow or talk to a provider,
     // and holding a row lock while it does would block everything else.
@@ -211,7 +223,7 @@ export class ActionExecutorService {
         // Dependencies are handed to the handler rather than captured in a
         // closure, which is what lets every definition be static data the
         // capability table can read without constructing anything.
-        deps: { prisma: this.prisma },
+        deps: { prisma: this.prisma, integrations: this.integrations },
       });
     } catch (error) {
       clearTimeout(timer);
@@ -395,6 +407,28 @@ export class ActionExecutorService {
       },
     });
 
+    if (succeeded) {
+      this.announce(pending, 'assistant.action.completed', {
+        pendingActionId: pending.id,
+        actionId: action.id,
+        executionId: execution.id,
+        // The executor's own status, unchanged. A client must not read
+        // HANDOFF, PARTIAL or UNVERIFIED as success.
+        status: outcome.status,
+        verified: outcome.verified,
+        detail: outcome.detail,
+      });
+    } else {
+      this.announce(pending, 'assistant.action.failed', {
+        pendingActionId: pending.id,
+        actionId: action.id,
+        executionId: execution.id,
+        code: outcome.failureCode ?? 'unknown',
+        detail: outcome.detail,
+        retryable: false,
+      });
+    }
+
     return {
       executionId: execution.id,
       pendingActionId: pending.id,
@@ -409,6 +443,56 @@ export class ActionExecutorService {
       startedAt: execution.startedAt.toISOString(),
       finishedAt: execution.finishedAt?.toISOString() ?? null,
     };
+  }
+
+  /**
+   * Publishes an execution event, when the action came from a voice session.
+   *
+   * Only then: the event envelope is tied to a session, and an action
+   * started from a REST call has no session for a client to be watching.
+   * Published through the bus rather than to a socket, so this service does
+   * not know a gateway exists.
+   *
+   * Never awaited and never allowed to throw: a socket write must not sit
+   * in the path of an execution, and a broken listener must not fail one.
+   */
+  private announce(
+    pending: PendingAction,
+    type:
+      | 'assistant.action.started'
+      | 'assistant.action.completed'
+      | 'assistant.action.failed',
+    payload: Record<string, unknown>,
+  ): void {
+    if (!pending.voiceSessionId) return;
+
+    try {
+      this.events.publish(
+        {
+          type,
+          id: randomUUID(),
+          userId: pending.userId,
+          deviceId: pending.deviceId,
+          sessionId: pending.voiceSessionId,
+          seq: 0,
+          at: new Date().toISOString(),
+          correlationId: null,
+          ...payload,
+        } as never,
+        {
+          userId: pending.userId,
+          deviceId: pending.deviceId,
+          sessionId: pending.voiceSessionId,
+          // The device that raised the confirmation is the one watching.
+          deviceOnly: true,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not publish ${type}: ` +
+          (error instanceof Error ? error.message : 'unknown error'),
+      );
+    }
   }
 
   /**

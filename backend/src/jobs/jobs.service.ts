@@ -4,6 +4,8 @@ import { Worker, type Job } from 'bullmq';
 import { AppConfigService } from '../config/app-config.module';
 import { PrismaService } from '../database/prisma.service';
 import { ActionExecutorService } from '../modules/actions/action-executor.service';
+import { ConnectionsService } from '../modules/integrations/connections.service';
+import { OAuthService } from '../modules/integrations/oauth.service';
 import { NotificationsService } from '../modules/notifications/notifications.service';
 import { NotesService } from '../modules/notes/notes.service';
 import { RemindersService, jobIdFor } from '../modules/reminders/reminders.service';
@@ -51,6 +53,8 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     private readonly actions: ActionExecutorService,
     private readonly voice: VoiceService,
     private readonly voiceSessions: VoiceSessionService,
+    private readonly connections: ConnectionsService,
+    private readonly oauth: OAuthService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -141,6 +145,13 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
         return { handled: job.name, detail: { repaired: await this.reminders.reconcile() } };
       case JOB.reconcileActions:
         return { handled: job.name, detail: { reconciled: await this.actions.reconcileStale() } };
+      case JOB.refreshIntegrations: {
+        const report = await this.connections.refreshExpiring();
+        return { handled: job.name, detail: { ...report } };
+      }
+      case JOB.purgeOauthStates:
+        return { handled: job.name, detail: { purged: await this.oauth.purgeStates() } };
+
       case JOB.expireStale:
         return this.expireStale(job.name);
       case JOB.cleanupAudio:

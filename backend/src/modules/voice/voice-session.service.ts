@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   VoiceSessionState as State,
@@ -7,8 +8,9 @@ import {
 } from '@prisma/client';
 import { AppError } from '../../common/errors/app-error';
 import { PrismaService } from '../../database/prisma.service';
+import { requestContext } from '../../common/request-context';
 import { AppConfigService } from '../../config/app-config.module';
-import { EPHEMERAL_EVENTS, type VoiceEvent } from './voice-events';
+import { EPHEMERAL_EVENTS, type VoiceEvent, type VoiceEventPayload } from './voice-events';
 
 /**
  * The permitted transitions.
@@ -254,36 +256,52 @@ export class VoiceSessionService {
    * not written. They are pushed live and then gone.
    */
   async recordEvent<T extends VoiceEvent>(
-    sessionId: string,
+    session: { id: string; userId: string; deviceId: string },
     type: T['type'],
-    payload: Omit<T, 'sessionId' | 'seq' | 'at' | 'type'>,
+    payload: VoiceEventPayload<T>,
   ): Promise<T> {
     const at = new Date();
+    // A fresh id per event. This is what lets a reconnecting client discard
+    // something it already holds without comparing contents.
+    const id = randomUUID();
+    const correlationId = requestContext.correlationId() ?? null;
+
+    const envelope = {
+      id,
+      userId: session.userId,
+      deviceId: session.deviceId,
+      sessionId: session.id,
+      at: at.toISOString(),
+      correlationId,
+    };
 
     if (EPHEMERAL_EVENTS.has(type)) {
-      return { ...payload, type, sessionId, seq: 0, at: at.toISOString() } as unknown as T;
+      return { ...payload, ...envelope, type, seq: 0 } as unknown as T;
     }
 
     const seq = await this.prisma.transaction(async (tx) => {
-      const session = await tx.voiceSession.update({
-        where: { id: sessionId },
+      const row = await tx.voiceSession.update({
+        where: { id: session.id },
         data: { lastEventSeq: { increment: 1 } },
         select: { lastEventSeq: true },
       });
 
       await tx.voiceSessionEvent.create({
         data: {
-          voiceSessionId: sessionId,
-          seq: session.lastEventSeq,
+          voiceSessionId: session.id,
+          seq: row.lastEventSeq,
           type,
+          // The envelope is reconstructed on replay from the row and the
+          // session, so only the event-specific fields are stored. Keeping
+          // a second copy of the ids would be a second thing to disagree.
           payload: payload as unknown as Prisma.InputJsonValue,
         },
       });
 
-      return session.lastEventSeq;
+      return row.lastEventSeq;
     });
 
-    return { ...payload, type, sessionId, seq, at: at.toISOString() } as unknown as T;
+    return { ...payload, ...envelope, type, seq } as unknown as T;
   }
 
   /**
@@ -314,10 +332,16 @@ export class VoiceSessionService {
         (row) =>
           ({
             ...(row.payload as object),
-            type: row.type,
+            // The same id every time this row is replayed, so a client
+            // that receives it twice recognises it as one event.
+            id: row.id,
+            userId: session.userId,
+            deviceId: session.deviceId,
             sessionId,
+            type: row.type,
             seq: row.seq,
             at: row.createdAt.toISOString(),
+            correlationId: null,
           }) as VoiceEvent,
       ),
     };

@@ -53,6 +53,14 @@ export const RateLimit = {
   /// these are generous. The batch size limit is the real bound on work.
   syncPull: { ttl: 60_000, limit: scale(120) },
   syncPush: { ttl: 60_000, limit: scale(60) },
+
+  /// Starting an OAuth flow writes a state row and is a step a person takes
+  /// deliberately, so the ceiling is low — it also bounds how fast someone
+  /// could probe callbacks.
+  integrationAuthorize: { ttl: 60_000, limit: scale(10) },
+  /// A provider operation costs an upstream call and may be rate-limited
+  /// there too, so this sits below what most providers allow.
+  integrationOperation: { ttl: 60_000, limit: scale(30) },
 } as const;
 
 /** A deliberately tiny limit the rate-limit test can target. */

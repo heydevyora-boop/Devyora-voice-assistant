@@ -295,6 +295,7 @@ model User {
   notifications       Notification[]
   auditLogs           AuditLog[]
   verificationTokens  VerificationToken[]
+  oauthStates         OAuthState[]
 
   @@index([deletedAt])
   @@index([status])
@@ -335,6 +336,7 @@ model Device {
   voiceSessions  VoiceSession[]
   pendingActions PendingAction[]
   syncCursors    SyncCursor[]
+  oauthStates    OAuthState[]
 
   @@index([userId, revokedAt])
   @@index([lastSeenAt])
@@ -873,9 +875,16 @@ model ConnectedAccount {
   keyVersion      Int       @default(1)
   expiresAt       DateTime?
 
-  status    ConnectionStatus @default(CONNECTED)
-  lastError String?
-  revokedAt DateTime?
+  status        ConnectionStatus @default(CONNECTED)
+  /// Normalised code, e.g. `refresh_rejected`. Never a provider message.
+  lastErrorCode String?          @db.VarChar(40)
+  lastError     String?
+  revokedAt     DateTime?
+
+  /// Refresh bookkeeping, so the refresh job can back off a connection the
+  /// provider keeps rejecting rather than retrying it every few minutes.
+  lastRefreshAt   DateTime?
+  refreshFailures Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -885,12 +894,61 @@ model ConnectedAccount {
   /// One live connection per provider per user; revoked rows may accumulate.
   @@unique([userId, provider, revokedAt])
   @@index([userId, status])
+  /// The refresh sweep reads this.
+  @@index([status, expiresAt])
   @@map("connected_accounts")
 }
 
 /// One row per user. Grouped documents rather than a column per setting,
 /// because the frontend already treats these as three cohesive objects and
 /// they change shape as features land.
+/// One in-flight OAuth authorisation.
+///
+/// Stored server-side rather than signed into the state parameter for two
+/// reasons: it can be consumed exactly once, which is what makes a replayed
+/// callback harmless; and the PKCE verifier has to be kept somewhere the
+/// browser never sees.
+///
+/// Rows are short-lived and swept. A consumed or expired row is kept briefly
+/// so a replay can be told apart from a forgery in the audit log.
+model OAuthState {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// The opaque value that travels in the authorisation URL. Unique, so a
+  /// callback either matches exactly one in-flight request or none.
+  state String @unique @db.VarChar(64)
+
+  userId   String             @db.Uuid
+  /// The device that started it. A callback is only accepted for the
+  /// session that began the flow.
+  deviceId String             @db.Uuid
+  provider ConnectionProvider
+
+  /// PKCE verifier, sealed. It must be presented to the token endpoint, so
+  /// it cannot be hashed — and it must never reach the browser, so it
+  /// cannot live in the state parameter.
+  codeVerifierEnc Bytes?
+  keyVersion      Int    @default(1)
+
+  redirectUri String   @db.VarChar(500)
+  scopes      String[]
+
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  ipAddress String? @db.Inet
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("oauth_states")
+}
+
 model UserPreference {
   userId String @id @db.Uuid
 

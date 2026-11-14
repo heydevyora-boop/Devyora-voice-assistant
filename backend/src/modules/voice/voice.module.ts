@@ -5,7 +5,6 @@ import { AssistantModule } from '../assistant/assistant.module';
 import { AudioStoreService } from './audio/audio-store.service';
 import { SttService } from './stt.service';
 import { TtsService } from './tts.service';
-import { VoiceEventBus } from './voice-event-bus';
 import { VoiceGateway } from './voice.gateway';
 import { VoiceSessionService } from './voice-session.service';
 import { VoiceController } from './voice.controller';
@@ -20,9 +19,8 @@ import { VoiceService } from './voice.service';
     SttService,
     TtsService,
     AudioStoreService,
-    VoiceEventBus,
     VoiceGateway,
   ],
-  exports: [VoiceService, VoiceSessionService, AudioStoreService, VoiceEventBus],
+  exports: [VoiceService, VoiceSessionService, AudioStoreService],
 })
 export class VoiceModule {}

@@ -93,6 +93,17 @@ export interface JobsConfig {
   readonly maintenanceEnabled: boolean;
 }
 
+export interface IntegrationsConfig {
+  readonly redirectBaseUrl: string;
+  readonly timeoutMs: number;
+  readonly refreshLeadMs: number;
+  readonly googleClientId?: string;
+  readonly googleClientSecret?: string;
+  readonly metaAppId?: string;
+  readonly metaAppSecret?: string;
+  readonly whatsappPhoneNumberId?: string;
+}
+
 export interface ProductivityConfig {
   readonly defaultTimezone: string;
   readonly tombstoneDays: number;
@@ -114,6 +125,7 @@ export interface ProvidersConfig {
   readonly actions: ActionsConfig;
   readonly push: PushConfig;
   readonly productivity: ProductivityConfig;
+  readonly integrations: IntegrationsConfig;
   readonly jobs: JobsConfig;
   readonly redisUrl?: string;
   readonly jwt: {
@@ -203,6 +215,16 @@ export function buildConfiguration(env: Env): Configuration {
         apnsBundleId: env.APNS_BUNDLE_ID,
         apnsPrivateKey: env.APNS_PRIVATE_KEY,
         apnsSandbox: env.APNS_SANDBOX,
+      },
+      integrations: {
+        redirectBaseUrl: env.INTEGRATION_REDIRECT_BASE_URL,
+        timeoutMs: env.INTEGRATION_TIMEOUT_MS,
+        refreshLeadMs: env.INTEGRATION_REFRESH_LEAD_MS,
+        googleClientId: env.GOOGLE_CLIENT_ID,
+        googleClientSecret: env.GOOGLE_CLIENT_SECRET,
+        metaAppId: env.META_APP_ID,
+        metaAppSecret: env.META_APP_SECRET,
+        whatsappPhoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
       },
       jobs: { maintenanceEnabled: env.JOBS_MAINTENANCE_ENABLED },
       productivity: {
